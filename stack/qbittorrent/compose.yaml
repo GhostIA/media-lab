@@ -1,0 +1,27 @@
+# qBittorrent download client (unit 7). Deployed by stack/deploy.sh (-f after stack/compose.yaml, project media-stack).
+# WebUI http://<vm-ip>:8080, auth stays on (no subnet whitelist); configure with ./configure.sh.
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls487
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/Chicago}
+      - UMASK=${UMASK:-002}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    ports:
+      - "8080:8080"
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/qbittorrent:/config
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

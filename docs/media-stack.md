@@ -23,6 +23,7 @@ VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.
      ├─ radarr       :7878   movies                   /data
      ├─ lidarr       :8686   music                    /data
      ├─ prowlarr     :9696   indexers -> app sync to sonarr/radarr/lidarr
+     ├─ flaresolverr (8191, internal only)  Cloudflare solver, Prowlarr indexer proxy (tag flaresolverr)
      ├─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr
      └─ qbittorrent  :8080   downloads into           /data/torrents/<category>
  │

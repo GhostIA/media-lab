@@ -1,0 +1,32 @@
+# Lidarr (music). Included by the root stack/compose.yaml; host paths come only from
+# ${DATA_ROOT} / ${CONFIG_ROOT} in stack/.env. The API key is injected by deploy.sh from
+# secrets.env.tpl (op:// reference) into secrets.env, which is optional on first start.
+services:
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:3.1.6.5079-ls49
+    container_name: lidarr
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-America/Chicago}
+      UMASK: ${UMASK:-002}
+      # Forms login on the UI; LAN clients skip it. A later OIDC proxy sits in front of :8686.
+      LIDARR__AUTH__METHOD: Forms
+      LIDARR__AUTH__REQUIRED: DisabledForLocalAddresses
+    # deploy.sh passes every service file with -f, so relative paths resolve against the
+    # project dir (stack/), not this file's dir: hence lidarr/secrets.env.
+    env_file:
+      - path: lidarr/secrets.env
+        required: false
+    ports:
+      - "8686:8686"
+    volumes:
+      - ${CONFIG_ROOT}/lidarr:/config
+      - ${DATA_ROOT}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8686/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

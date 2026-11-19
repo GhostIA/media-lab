@@ -1,13 +1,17 @@
 ---
 # Media stack VM host (VM 200 media-stack): Docker CE + compose plugin, qemu-guest-agent, rsync,
-# ext4 /data on the data disk (scsi1; formatted ONLY when blkid finds no signature at all),
-# fstab by UUID with nofail, docker.service requires the /data mount, /data tree and
-# /opt/media-stack/{config,stack} owned by PUID:PGID. Replaces `vm-media-stack.sh bootstrap`.
-# Never reformats a disk that has any signature and never restarts docker.
+# ext4 /data on the data disk (scsi1; formatted ONLY when blkid finds no signature at all AND
+# `-e confirm_format=<disk>` names it), fstab by UUID with nofail, docker.service requires the
+# /data mount, /data tree and /opt/media-stack/{config,stack} owned by PUID:PGID.
+# Replaces `vm-media-stack.sh bootstrap`.
+# Never reformats a disk that has any signature and never restarts docker. A blank disk without
+# confirm_format stops the play before anything is written.
 #
 # usage (from ansible/):
 #   ansible-playbook playbooks/media-host.yml --check --diff   # dry run
 #   ansible-playbook playbooks/media-host.yml
+#   # new VM, blank data disk only:
+#   ansible-playbook playbooks/media-host.yml -e confirm_format=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 - name: Media stack VM host
   hosts: media_vms
   become: true

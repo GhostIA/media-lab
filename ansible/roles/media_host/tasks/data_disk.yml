@@ -1,6 +1,7 @@
 ---
 # The data disk is formatted ONLY when `blkid -p` finds no signature at all (exit 2: no
-# filesystem, no partition table). Any other result leaves the disk untouched.
+# filesystem, no partition table) AND the operator confirmed it with
+# `-e confirm_format=<by-id path or /dev/sdX>`. Any other result leaves the disk untouched.
 - name: Look up the data disk by-id link
   ansible.builtin.stat:
     path: "{{ media_host_data_disk }}"
@@ -35,13 +36,25 @@
   failed_when: media_host_disk_probe.rc not in [0, 2]   # 0 = signature found, 2 = blank
   check_mode: false
 
-- name: Format the blank data disk as ext4
+- name: Refuse to format the blank data disk without explicit confirmation
+  ansible.builtin.fail:
+    msg: >-
+      {{ media_host_data_disk }} ({{ media_host_disk_dev.stat.path }}) is blank (no filesystem, no
+      partition table) and would be formatted as ext4. Nothing was written. To format it, rerun with
+      -e confirm_format={{ media_host_data_disk }}
+  when:
+    - media_host_disk_probe.rc == 2
+    - media_host_confirm_format not in [media_host_data_disk, media_host_disk_dev.stat.path]
+
+- name: Format the blank data disk as ext4 (confirmed)
   community.general.filesystem:
     dev: "{{ media_host_disk_dev.stat.path }}"
     fstype: ext4
     opts: -L {{ media_host_data_label }} -m 0 -E nodiscard
     force: false
-  when: media_host_disk_probe.rc == 2
+  when:
+    - media_host_disk_probe.rc == 2
+    - media_host_confirm_format in [media_host_data_disk, media_host_disk_dev.stat.path]
 
 - name: Read the data disk filesystem
   ansible.builtin.command: blkid -o export {{ media_host_disk_dev.stat.path }}

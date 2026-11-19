@@ -36,6 +36,18 @@
     group: "{{ media_pgid }}"
     mode: "02775"
 
+# Docker would create a missing bind-mount source as root:root, which apps running as a fixed
+# non-root uid (e.g. Seerr, uid 1000) can't write to. Create each service's config dir owned by
+# PUID:PGID up front. No mode on purpose: the live dirs differ (2775/2755, linuxserver images
+# manage their own), and a fixed mode would change them on every host; new dirs get the umask default.
+- name: Ensure each service's config directory exists, owned by PUID:PGID  # noqa: risky-file-permissions
+  ansible.builtin.file:
+    path: "{{ media_stack_config_root }}/{{ item | dirname }}"
+    state: directory
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+  loop: "{{ media_stack_compose_files | reject('eq', 'compose.yaml') | list }}"
+
 - name: Ensure the stack directories exist
   ansible.builtin.file:
     path: "{{ media_stack_root }}/{{ item.path }}"
@@ -150,12 +162,30 @@
   loop: "{{ media_stack_secret_services }}"
   when: not ansible_check_mode or media_stack_secrets_stat.results | selectattr('item', 'eq', item) | map(attribute='stat.exists') | first
 
+# In check mode the files above were not copied, so a newly added service's compose.yaml is not on
+# the VM yet: only pass Compose the files that already exist there (the new service shows up as a
+# copy diff above instead).
+- name: Find the Compose files already on the VM (check mode)
+  ansible.builtin.stat:
+    path: "{{ media_stack_root }}/{{ item }}"
+  loop: "{{ media_stack_compose_files }}"
+  register: media_stack_compose_stat
+  when: ansible_check_mode
+
 - name: Docker compose up (recreates only services whose config changed)
+  vars:
+    media_stack_compose_present: >-
+      {{ media_stack_compose_stat.results | selectattr('stat', 'defined') | selectattr('stat.exists')
+         | map(attribute='item') | list if ansible_check_mode else media_stack_compose_files }}
+    media_stack_services_present: >-
+      {{ media_stack_services | select('in', media_stack_compose_present | map('dirname') | list) | list }}
   community.docker.docker_compose_v2:
     project_src: "{{ media_stack_root }}"
-    files: "{{ media_stack_compose_files }}"
+    files: "{{ media_stack_compose_present }}"
     env_files: [.env]
-    services: "{{ media_stack_services | default(omit, true) }}"
+    services: "{{ media_stack_services_present | default(omit, true) }}"
     state: present
     recreate: auto
     remove_orphans: false
+  # check mode with only not-yet-copied services selected: nothing for Compose to evaluate
+  when: media_stack_services | length == 0 or media_stack_services_present | length > 0

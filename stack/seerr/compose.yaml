@@ -1,0 +1,25 @@
+# Seerr: media requests for Jellyfin users (successor of Jellyseerr/Overseerr). Merged into the
+# media-stack project by ansible/playbooks/media-stack.yml (`-f seerr/compose.yaml`).
+# Host paths come only from ${CONFIG_ROOT} (shared env, stack/.env.example); see stack/seerr/README.md.
+# The official image runs as the `node` user (uid 1000), so the role pre-creates
+# ${CONFIG_ROOT}/seerr owned by PUID:PGID (1000:1000); Seerr does not need /data.
+services:
+  seerr:
+    image: ghcr.io/seerr-team/seerr:v3.5.2
+    container_name: seerr
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: ${TZ:-America/Chicago}
+      LOG_LEVEL: info
+      PORT: 5055
+    ports:
+      - "5055:5055"      # web UI / API (own port, ready for a later OIDC proxy)
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/seerr:/app/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5055/api/v1/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

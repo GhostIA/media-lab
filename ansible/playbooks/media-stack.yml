@@ -1,0 +1,22 @@
+---
+# Deploy the media stack to the media-stack VM (replaces stack/deploy.sh). Safe to rerun.
+#
+# usage (from ansible/, 1Password unlocked for `op inject`):
+#   ansible-playbook playbooks/media-stack.yml --check --diff     # dry run
+#   ansible-playbook playbooks/media-stack.yml                    # sync, secrets, compose up (all)
+#   ansible-playbook playbooks/media-stack.yml -e '{"media_stack_services": ["sonarr"]}'
+#   ansible-playbook playbooks/media-stack.yml -e media_stack_src=/path/to/stack
+#
+# Validate the merged Compose files locally (was `deploy.sh config`), from stack/:
+#   docker compose -f compose.yaml $(printf -- '-f %s ' */compose.yaml) --env-file .env.example config -q
+#   (create empty <svc>/secrets.env placeholders first if Compose complains; never commit them)
+#
+# What it does: copies stack/ (minus .env and */secrets.env) to media_stack_root (owner 1000),
+# creates .env from .env.example if absent, renders <svc>/secrets.env from secrets.env.tpl via
+# `op inject` (mode 0600, never written on the Mac), then `docker compose up` with recreate=auto.
+# It never deletes files on the VM and never stops or takes down the stack.
+- name: Deploy the media stack
+  hosts: media_vms
+  gather_facts: false
+  roles:
+    - media_stack

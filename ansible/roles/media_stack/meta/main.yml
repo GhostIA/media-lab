@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: Ship stack/ to the media-stack VM, render <svc>/secrets.env from 1Password, docker compose up
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [all]
+dependencies: []

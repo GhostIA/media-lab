@@ -100,11 +100,10 @@ Terraform, `op whoami`), the cluster is up (`ansible-playbook playbooks/ceph.yml
 | 3 | Check VM and `/data` | `ansible intel-a163f8 -a 'qm status 200'`, `ssh media@192.168.8.200 'df -h /data; ls /data/*'` |
 | 4 | Create the 1Password item `media-stack` with generated API keys / password (only missing fields) | `ansible-playbook playbooks/secrets-init.yml` |
 | 5 | Sync `stack/`, render `secrets.env`, `docker compose up` | `ansible-playbook playbooks/media-stack.yml` |
-| 6 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` | `ansible-playbook playbooks/arr-config.yml` |
-| 7 | qBittorrent password, save path, categories `movies tv anime music`; Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
-| 8 | Download client qBittorrent in Sonarr (plus the `anime` client, section 6), Radarr, Lidarr | browser: Settings → Download Clients |
-| 9 | Jellyfin first-run wizard (below) | browser |
-| 10 | Add indexers in Prowlarr (manual, below) | browser |
+| 6 | qBittorrent password, save path, categories `movies tv anime music`; Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 7 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music`; download client qBittorrent (`qbittorrent:8080`, user `admin`) in Sonarr (category `tv`), Radarr (`movies`), Lidarr (`music`) | `ansible-playbook playbooks/arr-config.yml` |
+| 8 | Jellyfin first-run wizard (below) | browser |
+| 9 | Add indexers in Prowlarr (manual, below) | browser |
 
 Every playbook is safe to rerun and must report `changed=0` on a converged host; run it with
 `--check --diff` first. `media-stack.yml` only recreates containers whose definition changed, and
@@ -183,10 +182,11 @@ One Sonarr instance, two root folders:
 | Jellyfin library | Shows | Anime |
 
 When adding an anime series: choose root folder `/data/media/anime`, Series Type **Anime** and the anime
-profile, and give it the `anime` tag. Check in qBittorrent that anime grabs land under category `anime`:
-Sonarr's download client uses one category, so anime routing relies on a second qBittorrent download
-client (category `anime`, restricted to tag `anime`). No playbook creates the *arr download clients:
-add both under Settings → Download Clients (section 4 step 8). A series
+profile. `playbooks/arr-config.yml` creates one Sonarr download client (qBittorrent, category `tv`), so
+anime grabs also land in `/data/torrents/tv`; imports still go to `/data/media/anime` by root folder.
+Optional, not automated: to keep anime torrents under the qBittorrent category `anime`, add a second
+download client in Sonarr (Settings → Download Clients, qBittorrent, category `anime`, tag `anime`)
+and give anime series the `anime` tag. A series
 added to the wrong root folder can be moved with Series → Edit → Root Folder (Sonarr moves the files).
 
 ## 7. Backup and restore

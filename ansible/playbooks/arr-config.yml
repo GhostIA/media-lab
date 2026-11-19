@@ -1,12 +1,18 @@
 ---
-# *arr root folders through the apps' HTTP APIs (replaces stack/{sonarr,radarr,lidarr}/configure.sh).
+# *arr root folders and qBittorrent download client through the apps' HTTP APIs
+# (replaces stack/{sonarr,radarr,lidarr}/configure.sh and the manual "add download client" step).
 #   Sonarr  /api/v3/rootfolder  /data/media/tv, /data/media/anime
 #   Radarr  /api/v3/rootfolder  /data/media/movies
 #   Lidarr  /api/v1/rootfolder  /data/media/music ("Music", quality profile "Any", metadata "Standard")
-# Only missing folders are POSTed (changed only then); nothing is ever deleted or edited.
-# Runs on the control machine (localhost) against http://<media_vm.ip>:<port>: the API keys come
-# from 1Password in one item read (op CLI signed in, fields <app>_api_key of item media-stack; the
-# containers get the same keys via secrets.env) and never touch the VM.
+# Only missing folders are POSTed (changed only then); root folders are never deleted or edited.
+#   Download client "qBittorrent" (qbittorrent:8080, user admin) in each app, category
+#   Sonarr tv (anime series too), Radarr movies, Lidarr music. Missing -> POST from the app's schema;
+#   present -> PUT only when host/port/SSL/user/category/enable differ or the app's connection test
+#   (stored, masked password) fails. Other download clients are left alone.
+# Runs on the control machine (localhost) against http://<media_vm.ip>:<port>: the API keys and the
+# qBittorrent password come from 1Password in one item read (op CLI signed in, fields <app>_api_key
+# and qbittorrent_password of item media-stack; the containers get the same keys via secrets.env)
+# and never touch the VM.
 # An app whose /ping does not answer within 60-150s is skipped with a message (add
 # -e arr_config_fail_on_unreachable=true to fail instead). Any other error in one app is recorded,
 # the remaining apps still run, and the play fails at the end listing every error.
@@ -15,7 +21,7 @@
 #   ansible-playbook playbooks/arr-config.yml --check --diff   # report what would be added
 #   ansible-playbook playbooks/arr-config.yml
 #   ansible-playbook playbooks/arr-config.yml -e '{"arr_config_apps": [...]}'   # other apps/folders
-- name: Configure *arr root folders
+- name: Configure *arr root folders and download client
   hosts: localhost
   connection: local
   gather_facts: false

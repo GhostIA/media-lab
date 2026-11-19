@@ -1,11 +1,15 @@
 ---
 # One entry per *arr app. The role GETs <url>/api/<api_version>/rootfolder and POSTs only the
-# folders whose path is missing (trailing "/" ignored).
+# folders whose path is missing (trailing "/" ignored), then adds/fixes the qBittorrent download
+# client (tasks/download_client.yml).
 #   app          name; the API key is the 1Password field "<app>_api_key" of item
 #                arr_config_op_item in vault op_vault (same key the container gets via secrets.env)
 #   url          base URL, no trailing slash
 #   api_version  v3 (Sonarr/Radarr) or v1 (Lidarr)
 #   folders      list of POST bodies; each needs "path", other keys are sent as-is (e.g. "name")
+#   download_client  {category_field, category}: the qBittorrent category this app's download client
+#                sends grabs to; category_field is the field name in the app's QBittorrent schema
+#                (GET /api/<v>/downloadclient/schema). Omit to leave the app's download clients alone.
 #   extra.body      keys merged into every POST body of this app
 #   extra.profiles  {<body key>: {endpoint, name}}: the id of the profile called <name> from
 #                   GET /api/<v>/<endpoint>, else the lowest id; only looked up when a POST is needed
@@ -16,18 +20,23 @@ arr_config_apps:
     folders:
       - {path: /data/media/tv}
       - {path: /data/media/anime}
+    # One client, category tv, also for anime series. Routing anime to the qBittorrent "anime"
+    # category would need a second client (category anime) restricted to a series tag "anime".
+    download_client: {category_field: tvCategory, category: tv}
     extra: {}
   - app: radarr
     url: "http://{{ media_vm.ip }}:7878"
     api_version: v3
     folders:
       - {path: /data/media/movies}
+    download_client: {category_field: movieCategory, category: movies}
     extra: {}
   - app: lidarr
     url: "http://{{ media_vm.ip }}:8686"
     api_version: v1
     folders:
       - {path: /data/media/music, name: Music}
+    download_client: {category_field: musicCategory, category: music}
     extra:
       body:
         defaultMonitorOption: all
@@ -37,7 +46,16 @@ arr_config_apps:
         defaultQualityProfileId: {endpoint: qualityprofile, name: Any}
         defaultMetadataProfileId: {endpoint: metadataprofile, name: Standard}
 
-# 1Password item holding the <app>_api_key fields (vault: op_vault from group_vars/all.yml).
+# qBittorrent download client added to every app with a download_client entry (matched by name).
+# host is the compose service name: the apps reach qBittorrent on the media-stack network. The
+# password is the 1Password field qbittorrent_password of arr_config_op_item.
+arr_config_download_client:
+  name: qBittorrent
+  host: qbittorrent
+  port: 8080
+  username: admin
+
+# 1Password item holding the <app>_api_key and qbittorrent_password fields (vault: op_vault from group_vars/all.yml).
 arr_config_op_item: media-stack
 
 # Wait for GET <url>/ping: retries x (delay + up to timeout) seconds, i.e. 60-150s. An app still

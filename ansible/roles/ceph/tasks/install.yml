@@ -1,0 +1,15 @@
+---
+- name: Read the installed Ceph version
+  ansible.builtin.command:
+    argv: [ceph, --version]
+  register: ceph_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Ceph through pveceph
+  ansible.builtin.command:
+    argv: [pveceph, install, --repository, "{{ ceph_repository }}", --version, "{{ ceph_version }}"]
+    stdin: "{{ 'y\n' * 5 }}"
+  changed_when: true
+  when: ceph_installed_version.rc != 0 or (' ' ~ ceph_version ~ ' ') not in ceph_installed_version.stdout

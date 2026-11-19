@@ -1,0 +1,126 @@
+---
+# Join a standalone node to the cluster through the PVE API (replaces pve-tools/join.sh).
+# A node that already has /etc/pve/corosync.conf is in a cluster and is left alone.
+- name: Check whether the node is already in a cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: pve_cluster_corosync
+
+- name: Join the cluster
+  when: not pve_cluster_corosync.stat.exists
+  block:
+    - name: Refuse to join from the cluster node itself
+      ansible.builtin.assert:
+        that: inventory_hostname != pve_cluster_join_node
+        fail_msg: "{{ pve_cluster_join_node }} is the join target but has no corosync.conf; create the cluster first."
+        quiet: true
+
+    - name: Check that the join target is itself clustered
+      ansible.builtin.stat:
+        path: /etc/pve/corosync.conf
+      delegate_to: "{{ pve_cluster_join_node }}"
+      register: pve_cluster_target_corosync
+
+    - name: Refuse when the join target is not in a cluster
+      ansible.builtin.assert:
+        that: pve_cluster_target_corosync.stat.exists
+        fail_msg: "{{ pve_cluster_join_node }} has no /etc/pve/corosync.conf; nothing to join."
+        quiet: true
+
+    - name: Look for guests on the joining node
+      ansible.builtin.find:
+        paths: [/etc/pve/qemu-server, /etc/pve/lxc]
+        patterns: "*.conf"
+      register: pve_cluster_guests
+
+    - name: Refuse to join a node that has guests
+      ansible.builtin.assert:
+        that: pve_cluster_guests.matched == 0
+        fail_msg: >-
+          {{ inventory_hostname }} has guests ({{ pve_cluster_guests.files | map(attribute='path') | join(', ') }});
+          check VMID clashes before joining. Refusing.
+        quiet: true
+
+    - name: Fetch the cluster node's TLS certificate
+      ansible.builtin.command:
+        argv: [openssl, s_client, -connect, "{{ hostvars[pve_cluster_join_node].ansible_host }}:8006"]
+        stdin: "Q"   # non-empty so s_client gets input + EOF and exits (like </dev/null)
+      register: pve_cluster_s_client
+      changed_when: false
+      check_mode: false
+
+    - name: Compute the certificate SHA-256 fingerprint
+      ansible.builtin.command:
+        argv: [openssl, x509, -noout, -fingerprint, -sha256]
+        stdin: "{{ pve_cluster_s_client.stdout }}"
+      register: pve_cluster_x509
+      changed_when: false
+      check_mode: false
+
+    - name: Show the fingerprint
+      ansible.builtin.debug:
+        msg: "cluster node {{ pve_cluster_join_node }} fingerprint: {{ pve_cluster_fingerprint }}"
+      vars:
+        pve_cluster_fingerprint: "{{ pve_cluster_x509.stdout.split('=', 1)[1] }}"
+
+    - name: Report what a real run would do (uri does not support check mode)
+      ansible.builtin.debug:
+        msg: "would join {{ inventory_hostname }} ({{ ansible_host }}) to {{ pve_cluster_join_node }}"
+      when: ansible_check_mode
+
+    - name: Log in to the joining node's API as root@pam
+      when: not ansible_check_mode
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}:8006/api2/json/access/ticket"
+        method: POST
+        validate_certs: false
+        body_format: form-urlencoded
+        body:
+          username: root@pam
+          password: "{{ lookup('community.general.onepassword', pve_cluster_op_items[inventory_hostname],
+                       field='password', vault=op_vault) }}"
+      register: pve_cluster_login
+      no_log: true
+
+    - name: Ask the joining node to join the cluster
+      when: not ansible_check_mode
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}:8006/api2/json/cluster/config/join"
+        method: POST
+        validate_certs: false
+        headers:
+          CSRFPreventionToken: "{{ pve_cluster_login.json.data.CSRFPreventionToken }}"
+          Cookie: "PVEAuthCookie={{ pve_cluster_login.json.data.ticket }}"
+        body_format: form-urlencoded
+        body:
+          hostname: "{{ hostvars[pve_cluster_join_node].ansible_host }}"
+          fingerprint: "{{ pve_cluster_x509.stdout.split('=', 1)[1] }}"
+          link0: "{{ ansible_host }}"
+          password: "{{ lookup('community.general.onepassword', pve_cluster_op_items[pve_cluster_join_node],
+                       field='password', vault=op_vault) }}"
+      changed_when: true
+      no_log: true
+
+    - name: Wait for the node to appear in the cluster
+      ansible.builtin.command:
+        argv: [pvecm, nodes]
+      delegate_to: "{{ pve_cluster_join_node }}"
+      register: pve_cluster_nodes
+      until: inventory_hostname in pve_cluster_nodes.stdout.split()
+      retries: "{{ pve_cluster_join_retries }}"
+      delay: "{{ pve_cluster_join_delay }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Show cluster quorum
+      ansible.builtin.command:
+        argv: [pvecm, status]
+      delegate_to: "{{ pve_cluster_join_node }}"
+      register: pve_cluster_status
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Report the join
+      ansible.builtin.debug:
+        msg: "{{ pve_cluster_status.stdout_lines | select('search', 'Nodes:|Quorate:') | list }}"
+      when: not ansible_check_mode

@@ -1,0 +1,3 @@
+---
+# The osds phase is confirmed with the extra var `confirm_destroy` (shared contract name, no default).
+ceph_confirm: "{{ confirm_destroy | default('') | string }}"

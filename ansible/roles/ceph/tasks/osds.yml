@@ -1,0 +1,124 @@
+---
+# DESTRUCTIVE: zaps one disk and creates an OSD on it. Runs only with
+#   --tags osds -e confirm_destroy=<serial>
+# where <serial> is in some host's ceph_osd_serials. Only the host owning that serial does anything,
+# and it refuses when the disk is missing, mounted / in use, or already an OSD.
+- name: Refuse unless confirm_destroy names a configured OSD serial
+  ansible.builtin.assert:
+    that:
+      - ceph_confirm | length > 0
+      - ceph_confirm in ceph_all_osd_serials
+    fail_msg: >-
+      Refusing: pass -e confirm_destroy=<serial> with one of {{ ceph_all_osd_serials | join(', ') }}
+      (got '{{ ceph_confirm }}').
+    quiet: true
+  vars:
+    ceph_all_osd_serials: >-
+      {{ groups['ceph_osds'] | map('extract', hostvars, 'ceph_osd_serials') | flatten }}
+  run_once: true
+
+- name: Create the confirmed OSD on its host
+  when: ceph_confirm in (ceph_osd_serials | default([]))
+  block:
+    - name: List disks with serials
+      ansible.builtin.command:
+        argv: [lsblk, -J, -d, -p, -o, "NAME,SERIAL"]
+      register: ceph_osd_lsblk
+      changed_when: false
+      check_mode: false
+
+    - name: Find the disk by serial
+      ansible.builtin.set_fact:
+        ceph_osd_dev: >-
+          {% for d in (ceph_osd_lsblk.stdout | from_json).blockdevices
+             if (d.serial | default('', true) | trim) == ceph_confirm %}{{ d.name if loop.first else '' }}{% endfor %}
+
+    - name: Refuse when the serial is not present
+      ansible.builtin.assert:
+        that: ceph_osd_dev | length > 0
+        fail_msg: "serial {{ ceph_confirm }} not found on {{ inventory_hostname }}"
+        quiet: true
+
+    - name: List mountpoints on the disk and everything stacked on it
+      ansible.builtin.command:
+        argv: [lsblk, -n, -r, -o, MOUNTPOINTS, "{{ ceph_osd_dev }}"]
+      register: ceph_osd_mounts
+      changed_when: false
+      check_mode: false
+
+    - name: List mounted sources
+      ansible.builtin.command:
+        argv: [findmnt, -r, -n, -o, SOURCE]
+      register: ceph_osd_findmnt
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse when the disk is mounted
+      ansible.builtin.assert:
+        that:
+          - ceph_osd_mounts.stdout_lines | select | list | length == 0
+          - ceph_osd_findmnt.stdout_lines | select('match', '^' ~ ceph_osd_dev ~ '(p?[0-9]+)?$') | list | length == 0
+        fail_msg: "{{ ceph_osd_dev }} ({{ ceph_confirm }}) is mounted or in use, refusing"
+        quiet: true
+
+    - name: Check whether the disk is already an OSD
+      ansible.builtin.command:
+        argv: [ceph-volume, lvm, list, --format, json, "{{ ceph_osd_dev }}"]
+      register: ceph_osd_existing
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Refuse when the disk is already an OSD
+      ansible.builtin.assert:
+        that: ceph_osd_existing.rc == 0 and (ceph_osd_existing.stdout | from_json) == {}
+        fail_msg: "{{ ceph_osd_dev }} ({{ ceph_confirm }}) is already an OSD (or ceph-volume failed), refusing"
+        quiet: true
+
+    - name: List partitions on the disk
+      ansible.builtin.command:
+        argv: [lsblk, -l, -n, -p, -o, NAME, "{{ ceph_osd_dev }}"]
+      register: ceph_osd_parts
+      changed_when: false
+      check_mode: false
+
+    - name: Wipe partition signatures
+      ansible.builtin.command:
+        argv: [wipefs, -a, "{{ item }}"]
+      loop: "{{ ceph_osd_parts.stdout_lines[1:] }}"
+      changed_when: true
+
+    - name: Wipe the disk
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [wipefs, -a, "{{ ceph_osd_dev }}"]
+        - [sgdisk, --zap-all, "{{ ceph_osd_dev }}"]
+        - [dd, if=/dev/zero, "of={{ ceph_osd_dev }}", bs=1M, count=200, oflag=direct, status=none]
+        - [blockdev, --rereadpt, "{{ ceph_osd_dev }}"]
+        - [udevadm, settle]
+      loop_control:
+        label: "{{ item | join(' ') }}"
+      changed_when: true
+      # Like the old script: keep going on a non-zero rc (e.g. damaged GPT, EBUSY on reread);
+      # the partition re-check below decides whether the wipe worked.
+      failed_when: false
+
+    - name: Re-list partitions after the wipe
+      ansible.builtin.command:
+        argv: [lsblk, -l, -n, -p, -o, NAME, "{{ ceph_osd_dev }}"]
+      register: ceph_osd_parts_after
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse when partitions survived the wipe
+      ansible.builtin.assert:
+        that: ceph_osd_parts_after.stdout_lines | length == 1
+        fail_msg: "{{ ceph_osd_dev }} still has partitions"
+        quiet: true
+      when: not ansible_check_mode
+
+    - name: Create the OSD
+      ansible.builtin.command:
+        argv: [pveceph, osd, create, "{{ ceph_osd_dev }}"]
+      changed_when: true

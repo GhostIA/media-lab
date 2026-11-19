@@ -1,0 +1,26 @@
+---
+# Phases of the old pve-tools/ceph-setup.sh, selectable by tag. Every phase is a no-op once done.
+# The destructive `osds` phase only runs with `--tags osds -e confirm_destroy=<serial>`.
+- name: Install Ceph packages
+  ansible.builtin.import_tasks: install.yml
+  tags: [install]
+
+- name: Initialise ceph.conf
+  ansible.builtin.import_tasks: init.yml
+  tags: [init]
+
+- name: Create monitors and managers
+  ansible.builtin.import_tasks: mons.yml
+  tags: [mons]
+
+- name: Create OSDs (destructive)
+  ansible.builtin.import_tasks: osds.yml
+  tags: [never, osds]
+
+- name: Create the erasure-coded pool and PVE storage
+  ansible.builtin.import_tasks: pool.yml
+  tags: [pool]
+
+- name: Show Ceph status
+  ansible.builtin.import_tasks: status.yml
+  tags: [status]

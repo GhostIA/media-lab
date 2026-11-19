@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: Configure qBittorrent (WebUI password, prefs, categories) and Prowlarr (app sync, download client) via their APIs
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions: [all]
+dependencies: []

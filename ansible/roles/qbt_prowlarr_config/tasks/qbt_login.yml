@@ -1,0 +1,34 @@
+---
+# Log in to the qBittorrent WebUI with qbt_prowlarr_config_login_password.
+# Sets qbt_prowlarr_config_qbt_logged_in (bool) and qbt_prowlarr_config_qbt_cookie (SID cookie string).
+# qBittorrent 5.x answers 204 (empty body) on success, older WebAPIs 200 "Ok." (and 200 "Fails." on failure).
+- name: Log in to the qBittorrent WebUI
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_qbt_url }}/api/v2/auth/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: "{{ qbt_prowlarr_config_qbt_user }}"
+      password: "{{ qbt_prowlarr_config_login_password }}"
+    headers:
+      Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+    status_code: [200, 204, 401, 403]
+    return_content: true
+  register: qbt_prowlarr_config_login
+  check_mode: false   # read-only for the target; needed to read state in --check
+  no_log: true
+
+- name: Fail when qBittorrent has banned this IP
+  ansible.builtin.fail:
+    msg: >-
+      qBittorrent answered 403: this IP is banned after failed logins (WebUI ban duration, default 1h).
+      Wait for the ban to expire or restart the container, then rerun.
+  when: qbt_prowlarr_config_login.status == 403
+
+- name: Remember the login result and session cookie
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_qbt_logged_in: >-
+      {{ qbt_prowlarr_config_login.status == 204
+         or (qbt_prowlarr_config_login.status == 200 and (qbt_prowlarr_config_login.content | default('') | trim) == 'Ok.') }}
+    qbt_prowlarr_config_qbt_cookie: "{{ qbt_prowlarr_config_login.cookies_string | default('') }}"
+  no_log: true

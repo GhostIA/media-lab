@@ -1,0 +1,129 @@
+---
+# Create or update one Prowlarr entry (application or download client).
+# Inputs: qbt_prowlarr_config_kind (applications|downloadclient), _name, _impl (implementation),
+#   _want_top (top-level keys, e.g. syncLevel), _want_fields (field name -> value),
+#   _secret_field (the field in _want_fields that holds the apiKey/password).
+# An existing entry is matched by implementation (preferring the one with our name). It counts as
+# unchanged when the top-level keys and non-secret fields are equal and the stored secret is set and
+# equals ours or is masked. Prowlarr returns stored secrets as "********"; for a masked secret the
+# entry's connection test (POST <kind>/test, which uses the stored value) decides: a failing test means
+# the key/password was rotated and the entry is updated. Fields not in _want_fields (e.g. the download
+# client's unused apiKey, which is null) are not compared.
+
+- name: "Read the existing Prowlarr entries - {{ qbt_prowlarr_config_kind }}"
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/{{ qbt_prowlarr_config_kind }}"
+    headers:
+      X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+  register: qbt_prowlarr_config_list
+  check_mode: false
+  no_log: true
+
+- name: "Compare the existing entry with the wanted one ({{ qbt_prowlarr_config_name }})"
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_current: >-
+      {{ ((qbt_prowlarr_config_list.json | selectattr('implementation', 'eq', qbt_prowlarr_config_impl)
+           | selectattr('name', 'eq', qbt_prowlarr_config_name) | list)
+          + (qbt_prowlarr_config_list.json | selectattr('implementation', 'eq', qbt_prowlarr_config_impl) | list))
+         | first | default(none) }}
+    qbt_prowlarr_config_new_fields: >-
+      {{ qbt_prowlarr_config_want_fields | dict2items(key_name='name', value_name='value') }}
+  no_log: true
+
+- name: "Compare the non-secret settings and the stored secret - {{ qbt_prowlarr_config_name }}"
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_matches: >-
+      {{ qbt_prowlarr_config_current is not none
+         and (qbt_prowlarr_config_want_top | dict2items | difference(qbt_prowlarr_config_current | dict2items) | length == 0)
+         and (qbt_prowlarr_config_new_fields | rejectattr('name', 'eq', qbt_prowlarr_config_secret_field)
+              | map(attribute='name') | zip(qbt_prowlarr_config_new_fields
+                                            | rejectattr('name', 'eq', qbt_prowlarr_config_secret_field)
+                                            | map(attribute='value')) | map('list') | list
+              | difference(qbt_prowlarr_config_current.fields | map(attribute='name')
+                           | zip(qbt_prowlarr_config_current.fields | map(attribute='value', default='__unset__'))
+                           | map('list') | list)
+              | length == 0)
+         and qbt_prowlarr_config_stored_secret in ['********', qbt_prowlarr_config_want_fields[qbt_prowlarr_config_secret_field]] }}
+  vars:
+    qbt_prowlarr_config_stored_secret: >-
+      {{ (qbt_prowlarr_config_current.fields | default([]) | selectattr('name', 'eq', qbt_prowlarr_config_secret_field)
+          | map(attribute='value', default='__unset__') | first | default('__unset__')) }}
+  no_log: true
+
+- name: "Test the stored (masked) secret with Prowlarr's connection test - {{ qbt_prowlarr_config_name }}"
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/{{ qbt_prowlarr_config_kind }}/test"
+    method: POST
+    headers:
+      X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+    body_format: json
+    body: "{{ qbt_prowlarr_config_current }}"
+    timeout: 60
+  register: qbt_prowlarr_config_test
+  failed_when: false
+  check_mode: false   # the test changes nothing in Prowlarr
+  when: >-
+    qbt_prowlarr_config_matches
+    and '********' in (qbt_prowlarr_config_current.fields | selectattr('name', 'eq', qbt_prowlarr_config_secret_field)
+                       | map(attribute='value', default='__unset__') | list)
+  no_log: true
+
+- name: "Decide whether this entry needs a change - {{ qbt_prowlarr_config_name }}"
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_unchanged: >-
+      {{ qbt_prowlarr_config_matches
+         and (qbt_prowlarr_config_test is skipped or qbt_prowlarr_config_test.status | default(-1) == 200) }}
+
+- name: "Report the change that would be made (check mode) - {{ qbt_prowlarr_config_name }}"
+  ansible.builtin.debug:
+    msg: "would {{ 'create' if qbt_prowlarr_config_current is none else 'update' }} {{ qbt_prowlarr_config_name }}"
+  when: ansible_check_mode and (qbt_prowlarr_config_current is none or not qbt_prowlarr_config_unchanged)
+  changed_when: true
+
+- name: "Update {{ qbt_prowlarr_config_name }}"
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/{{ qbt_prowlarr_config_kind }}/{{ qbt_prowlarr_config_current.id }}"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+    body_format: json
+    body: >-
+      {{ qbt_prowlarr_config_current | combine(qbt_prowlarr_config_want_top)
+         | combine({'fields': qbt_prowlarr_config_current.fields
+                              | rejectattr('name', 'in', qbt_prowlarr_config_want_fields.keys() | list) | list
+                              + qbt_prowlarr_config_new_fields}) }}
+    status_code: [200, 202]
+  when: qbt_prowlarr_config_current is not none and not qbt_prowlarr_config_unchanged
+  changed_when: true
+  no_log: true
+
+- name: "Create {{ qbt_prowlarr_config_name }}"
+  when: qbt_prowlarr_config_current is none
+  block:
+    - name: "Read the Prowlarr schema - {{ qbt_prowlarr_config_kind }}"
+      ansible.builtin.uri:
+        url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/{{ qbt_prowlarr_config_kind }}/schema"
+        headers:
+          X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+      register: qbt_prowlarr_config_schema
+      check_mode: false
+      no_log: true
+
+    - name: "Create the entry from its schema - {{ qbt_prowlarr_config_name }}"
+      ansible.builtin.uri:
+        url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/{{ qbt_prowlarr_config_kind }}"
+        method: POST
+        headers:
+          X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+        body_format: json
+        body: >-
+          {{ qbt_prowlarr_config_schema.json | selectattr('implementation', 'eq', qbt_prowlarr_config_impl) | first
+             | dict2items | rejectattr('key', 'eq', 'id') | items2dict
+             | combine({'name': qbt_prowlarr_config_name, 'enable': true}, qbt_prowlarr_config_want_top)
+             | combine({'fields': (qbt_prowlarr_config_schema.json | selectattr('implementation', 'eq', qbt_prowlarr_config_impl)
+                                   | first).fields
+                                  | rejectattr('name', 'in', qbt_prowlarr_config_want_fields.keys() | list) | list
+                                  + qbt_prowlarr_config_new_fields}) }}
+        status_code: [200, 201]
+      changed_when: true
+      no_log: true

@@ -1,0 +1,92 @@
+---
+# Prowlarr API v1: applications Sonarr/Radarr/Lidarr (full sync) and the qBittorrent download client.
+# A service that does not answer yet is skipped (reported, not a failure), like the old configure.sh.
+# Prowlarr's download-client test creates a `prowlarr` category in qBittorrent; that is expected.
+
+- name: Check that Prowlarr answers
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_prowlarr_url }}/ping"
+    timeout: 5
+  check_mode: false
+
+- name: Check that the Prowlarr API key is in 1Password
+  ansible.builtin.assert:
+    that: qbt_prowlarr_config_secrets.prowlarr_api_key | default('') | length > 0
+    fail_msg: "1Password item {{ qbt_prowlarr_config_op_item }} has no value for prowlarr_api_key"
+    quiet: true
+
+- name: Check the Prowlarr API key
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_prowlarr_url }}/api/v1/system/status"
+    headers:
+      X-Api-Key: "{{ qbt_prowlarr_config_secrets.prowlarr_api_key }}"
+  check_mode: false
+  no_log: true
+
+- name: Probe which services answer (unreachable ones are skipped)
+  ansible.builtin.uri:
+    url: "{{ item.url if item.url is defined else 'http://' ~ media_vm.ip ~ ':' ~ item.port ~ '/ping' }}"
+    timeout: 5
+  register: qbt_prowlarr_config_probe
+  failed_when: false
+  check_mode: false
+  loop: "{{ qbt_prowlarr_config_apps + [{'name': qbt_prowlarr_config_dc_name, 'url': qbt_prowlarr_config_qbt_url ~ '/'}] }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Remember which services are reachable and have a credential in 1Password
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_reachable: >-
+      {{ qbt_prowlarr_config_probe.results | selectattr('status', 'defined') | selectattr('status', 'eq', 200)
+         | map(attribute='item')
+         | rejectattr('svc', 'defined') | map(attribute='name') | list
+         + (qbt_prowlarr_config_probe.results | selectattr('status', 'defined') | selectattr('status', 'eq', 200)
+            | map(attribute='item') | selectattr('svc', 'defined')
+            | selectattr('svc', 'in', qbt_prowlarr_config_keyed) | map(attribute='name') | list) }}
+  vars:
+    # services whose <svc>_api_key field in 1Password is non-empty
+    qbt_prowlarr_config_keyed: >-
+      {{ qbt_prowlarr_config_secrets | dict2items | selectattr('key', 'match', '.*_api_key$')
+         | selectattr('value') | map(attribute='key') | map('regex_replace', '_api_key$', '') | list }}
+
+- name: Report skipped services (not reachable, or no API key in 1Password)
+  ansible.builtin.debug:
+    msg: "SKIP {{ item }}"
+  loop: "{{ qbt_prowlarr_config_probe.results | map(attribute='item.name') | difference(qbt_prowlarr_config_reachable) }}"
+
+- name: Sync Prowlarr applications
+  ansible.builtin.include_tasks: prowlarr_upsert.yml
+  loop: "{{ qbt_prowlarr_config_apps }}"
+  loop_control:
+    loop_var: qbt_prowlarr_config_app
+    label: "{{ qbt_prowlarr_config_app.name }}"
+  when: qbt_prowlarr_config_app.name in qbt_prowlarr_config_reachable
+  vars:
+    qbt_prowlarr_config_kind: applications
+    qbt_prowlarr_config_name: "{{ qbt_prowlarr_config_app.name }}"
+    qbt_prowlarr_config_impl: "{{ qbt_prowlarr_config_app.name }}"
+    qbt_prowlarr_config_want_top:
+      enable: true
+      syncLevel: fullSync
+    qbt_prowlarr_config_secret_field: apiKey
+    qbt_prowlarr_config_want_fields:
+      prowlarrUrl: "{{ qbt_prowlarr_config_prowlarr_internal_url }}"
+      baseUrl: "http://{{ qbt_prowlarr_config_app.svc }}:{{ qbt_prowlarr_config_app.port }}"
+      apiKey: "{{ qbt_prowlarr_config_secrets[qbt_prowlarr_config_app.svc ~ '_api_key'] }}"
+
+- name: Sync the qBittorrent download client
+  ansible.builtin.include_tasks: prowlarr_upsert.yml
+  when: qbt_prowlarr_config_dc_name in qbt_prowlarr_config_reachable
+  vars:
+    qbt_prowlarr_config_kind: downloadclient
+    qbt_prowlarr_config_name: "{{ qbt_prowlarr_config_dc_name }}"
+    qbt_prowlarr_config_impl: QBittorrent
+    qbt_prowlarr_config_want_top:
+      enable: true
+    qbt_prowlarr_config_secret_field: password
+    qbt_prowlarr_config_want_fields:
+      host: "{{ qbt_prowlarr_config_dc_host }}"
+      port: "{{ qbt_prowlarr_config_dc_port | int }}"
+      useSsl: false
+      username: "{{ qbt_prowlarr_config_qbt_user }}"
+      password: "{{ qbt_prowlarr_config_secrets.qbittorrent_password }}"

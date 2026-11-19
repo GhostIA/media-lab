@@ -53,7 +53,9 @@ image)
   ;;
 create)
   [ -r "$PUBKEY" ] || { echo "FAIL: public key $PUBKEY not readable"; exit 1; }
-  PVESSH_STDIN=1 "$S" "$NODE" "cat > /root/$NAME.pub" < "$PUBKEY" 2>&1 | q
+  [ "${PUBKEY%.pub}" != "$PUBKEY" ] && [ -r "${PUBKEY%.pub}" ] || { echo "FAIL: private key ${PUBKEY%.pub} for $PUBKEY not readable"; exit 1; }
+  out=$(PVESSH_STDIN=1 "$S" "$NODE" "cat > /root/$NAME.pub && echo KEY_OK" < "$PUBKEY" 2>&1)
+  case "$out" in *KEY_OK*) ;; *) printf '%s\n' "$out" | q; echo "FAIL: could not copy $PUBKEY to $NODE"; exit 1 ;; esac
   rs "set -e
     # guard: VMID must be free cluster-wide or already be ours, on this node
     owner=\$(pvesh get /cluster/resources --type vm --output-format json | python3 -c 'import json,sys
@@ -82,8 +84,9 @@ for r in json.load(sys.stdin):
       --ipconfig0 ip=$VM_IP/24,gw=$GW --nameserver $DNS --searchdomain home.arpa >/dev/null
     echo \"\$cfg\" | grep -q '^scsi1:' || { qm set $VMID --scsi1 $STORAGE:$DATA_SIZE_GB,discard=on,iothread=1,ssd=1 >/dev/null; echo 'OK: data disk scsi1 ${DATA_SIZE_GB}G added'; }
     # grow the OS disk to $OS_SIZE (never shrinks)
-    cur=\$(qm config $VMID | sed -n 's/^scsi0:.*size=\([0-9]*\)G.*/\1/p')
-    if [ -n \"\$cur\" ] && [ \"\$cur\" -lt ${OS_SIZE%G} ]; then qm disk resize $VMID scsi0 $OS_SIZE >/dev/null; echo 'OK: scsi0 resized to $OS_SIZE'; fi
+    cur=\$(qm config $VMID | sed -n 's/^scsi0:.*size=\([0-9.]*[KMGT]\).*/\1/p' | awk '{n=\$0+0; u=substr(\$0,length(\$0)); f=(u==\"K\")?1/1048576:(u==\"M\")?1/1024:(u==\"T\")?1024:1; printf \"%d\", n*f}')
+    [ -n \"\$cur\" ] || { echo 'FAIL: cannot parse scsi0 size'; exit 1; }
+    if [ \"\$cur\" -lt ${OS_SIZE%G} ]; then qm disk resize $VMID scsi0 $OS_SIZE >/dev/null; echo 'OK: scsi0 resized to $OS_SIZE'; fi
     qm cloudinit update $VMID >/dev/null 2>&1 || true
     echo '-- config'; qm config $VMID | grep -E '^(name|cores|cpu|memory|balloon|machine|scsihw|net0|agent|onboot|scsi0|scsi1|ide2|ipconfig0|nameserver|ciuser):'
     echo 'CREATE_OK'"
@@ -98,8 +101,9 @@ start)
   echo; echo "FAIL: no ssh to $VM_USER@$VM_IP after 5 min"; exit 1
   ;;
 bootstrap)
-  vssh 'sudo sh -s' <<'EOF'
+  vssh "sudo VM_USER=$VM_USER sh -s" <<'EOF'
 set -e
+: "${VM_USER:?}"
 export DEBIAN_FRONTEND=noninteractive
 cloud-init status --wait >/dev/null 2>&1 || true   # let first-boot apt/user setup finish
 
@@ -123,18 +127,18 @@ SRC
 fi
 systemctl enable --now docker >/dev/null 2>&1
 systemctl start qemu-guest-agent   # static unit, started by udev when the virtio port appears
-id -nG media | grep -qw docker || usermod -aG docker media
+id -nG "$VM_USER" | grep -qw docker || usermod -aG docker "$VM_USER"
 echo "OK: $(docker --version), compose $(docker compose version --short), qemu-ga $(dpkg-query -W -f='${Version}' qemu-guest-agent)"
 
 # --- data disk (PVE scsi1): format ONLY if blkid finds nothing (no fs, no partition table)
 DEV=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 [ -b "$DEV" ] || { echo "FAIL: data disk $DEV not found"; exit 1; }
-if blkid -p "$DEV" >/dev/null 2>&1; then
-  echo "OK: $DEV already has $(blkid -p -s TYPE -o value "$DEV" 2>/dev/null || echo 'a signature'), not formatting"
-else
-  echo "formatting blank $DEV as ext4"
-  mkfs.ext4 -q -L data -m 0 -E nodiscard "$DEV"
-fi
+rc=0; blkid -p "$DEV" >/dev/null 2>&1 || rc=$?
+case $rc in
+  0) echo "OK: $DEV already has $(blkid -p -s TYPE -o value "$DEV" 2>/dev/null || echo 'a signature'), not formatting" ;;
+  2) echo "formatting blank $DEV as ext4"; mkfs.ext4 -q -L data -m 0 -E nodiscard "$DEV" ;;
+  *) echo "FAIL: blkid -p $DEV exit $rc (ambiguous signatures or probe error), not touching it"; exit 1 ;;
+esac
 [ "$(blkid -s TYPE -o value "$DEV")" = ext4 ] || { echo "FAIL: $DEV is not ext4, refusing to mount"; exit 1; }
 UUID=$(blkid -s UUID -o value "$DEV")
 mkdir -p /data
@@ -146,6 +150,15 @@ if ! grep -q "^UUID=$UUID " /etc/fstab; then
 fi
 mountpoint -q /data || mount /data
 echo "OK: /data mounted ($(df -h --output=size /data | tail -1 | tr -d ' '))"
+# nofail keeps the VM bootable (and reachable over SSH) without the data disk, but containers
+# must never start against the empty /data directory on the OS disk: docker requires the mount.
+DROPIN=/etc/systemd/system/docker.service.d/require-data.conf
+if [ ! -f "$DROPIN" ]; then
+  mkdir -p "${DROPIN%/*}"
+  printf '[Unit]\nRequiresMountsFor=/data\n' > "$DROPIN"
+  systemctl daemon-reload
+  echo "OK: docker.service now requires the /data mount"
+fi
 
 # --- directory tree, TRaSH layout, one owner 1000:1000, setgid group-writable
 for d in /data /data/torrents /data/media /opt/media-stack /opt/media-stack/config /opt/media-stack/stack; do
@@ -162,7 +175,7 @@ status)
   rs "qm status $VMID --verbose 2>&1 | grep -E '^(status|name|qmpstatus|uptime):' || echo 'VM $VMID: not found'
     qm agent $VMID ping >/dev/null 2>&1 && echo 'guest-agent: OK' || echo 'guest-agent: not answering'
     qm config $VMID 2>/dev/null | grep -E '^(scsi0|scsi1|ipconfig0):'"
-  vssh 'docker info >/dev/null && test -d /data/media && echo VM_READY
+  vssh 'mountpoint -q /data && docker info >/dev/null && test -d /data/media || exit 1; echo VM_READY
     df -h /data | tail -1; findmnt -no SOURCE,FSTYPE /data
     stat -c "%A %u:%g %n" /data /data/torrents /data/media /data/torrents/* /data/media/* /opt/media-stack/config /opt/media-stack/stack' \
     || echo "FAIL: VM not ready over ssh ($VM_USER@$VM_IP)"

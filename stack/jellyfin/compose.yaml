@@ -23,7 +23,8 @@ services:
     #   devices: ["/dev/dri:/dev/dri"]
     #   group_add: ["<render gid on the VM>"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8096/health"]
+      # /health answers 200 with "Degraded" while starting up, so require the body "Healthy"
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/health | grep -qx Healthy"]
       interval: 30s
       timeout: 10s
       retries: 3

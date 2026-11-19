@@ -1,0 +1,21 @@
+# media-stack: root Compose file for the *arr media stack on VM 200 (media-stack, 192.168.8.200).
+#
+# Layout (on the Mac in stack/, on the VM in /opt/media-stack/stack/):
+#   compose.yaml              this file: project name only, no services
+#   .env.example              shared settings (PUID/PGID/UMASK/TZ/DATA_ROOT/CONFIG_ROOT); deploy.sh
+#                             copies it to .env on the VM the first time; edit .env there, not here
+#   <svc>/compose.yaml        one file per service unit (jellyfin, sonarr, radarr, lidarr, ...)
+#   <svc>/secrets.env.tpl     optional: op:// references, resolved by deploy.sh into
+#                             <svc>/secrets.env on the VM only (mode 600, never in git or on the Mac)
+#   deploy.sh                 rsync + secrets + `docker compose up -d`; `deploy.sh config` validates
+#   secrets-init.sh           creates the 1Password item "media-stack" holding the app secrets
+#
+# Service files are not include:d here. deploy.sh finds every <svc>/compose.yaml and passes it with
+# -f after this file, so adding a service never edits a shared file. Consequence: relative paths in
+# <svc>/compose.yaml resolve against THIS directory (the project dir), not the service's own, so
+# write `env_file: <svc>/secrets.env`; host paths come from ${DATA_ROOT} and ${CONFIG_ROOT}.
+#
+# All services share the implicit default network (media-stack_default) and reach each other by
+# service name (e.g. http://sonarr:8989). Each UI keeps its own host port so an OIDC reverse proxy
+# can be put in front later without changing the apps.
+name: media-stack

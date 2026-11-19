@@ -1,0 +1,15 @@
+---
+# Media stack VM host (VM 200 media-stack): Docker CE + compose plugin, qemu-guest-agent, rsync,
+# ext4 /data on the data disk (scsi1; formatted ONLY when blkid finds no signature at all),
+# fstab by UUID with nofail, docker.service requires the /data mount, /data tree and
+# /opt/media-stack/{config,stack} owned by PUID:PGID. Replaces `vm-media-stack.sh bootstrap`.
+# Never reformats a disk that has any signature and never restarts docker.
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/media-host.yml --check --diff   # dry run
+#   ansible-playbook playbooks/media-host.yml
+- name: Media stack VM host
+  hosts: media_vms
+  become: true
+  roles:
+    - media_host

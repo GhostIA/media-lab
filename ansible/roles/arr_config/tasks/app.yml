@@ -1,0 +1,200 @@
+---
+# One *arr app (arr_config_app): wait for /ping, GET root folders, POST only the missing ones.
+# GETs run in check mode too (check_mode: false) so --check reports what would be added.
+# Every task carrying the API key has no_log; its failures are reported by the asserts that
+# follow it (status + message, never the key). A failure is rescued and recorded in
+# arr_config_failed so the remaining apps still run; main.yml fails at the end.
+- name: "Wait for /ping | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_app.url }}/ping"
+    timeout: "{{ arr_config_ping_timeout }}"
+  register: arr_config_ping
+  until: arr_config_ping.status == 200
+  retries: "{{ arr_config_ping_retries }}"
+  delay: "{{ arr_config_ping_delay }}"
+  failed_when: false
+  check_mode: false
+
+- name: "Skip unreachable app | {{ arr_config_app.app }}"
+  ansible.builtin.set_fact:
+    arr_config_skipped: >-
+      {{ arr_config_skipped + [arr_config_app.app ~ ': ' ~ arr_config_app.url ~ '/ping did not answer 200 after '
+         ~ arr_config_ping_retries ~ ' tries (last status ' ~ arr_config_ping.status ~ ' '
+         ~ (arr_config_ping.msg | default('')) ~ '). Root folders not checked.'] }}
+  when: arr_config_ping.status != 200
+
+- name: "Root folders | {{ arr_config_app.app }}"
+  when: arr_config_ping.status == 200
+  vars:
+    arr_config_api: "{{ arr_config_app.url }}/api/{{ arr_config_app.api_version }}"
+    arr_config_extra: "{{ arr_config_app.extra | default({}) }}"
+  block:
+    - name: "Pick API key | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        arr_config_api_key: "{{ arr_config_api_keys[arr_config_app.app ~ '_api_key'] | default('') }}"
+      no_log: true
+
+    - name: "Check the API key was read | {{ arr_config_app.app }}"
+      ansible.builtin.assert:
+        that: arr_config_api_key | length > 0
+        fail_msg: >-
+          {{ arr_config_app.app }}: could not read field {{ arr_config_app.app }}_api_key of 1Password
+          item {{ arr_config_op_item }} (vault {{ op_vault }}). Is `op` signed in?
+        quiet: true
+
+    - name: "GET root folders | {{ arr_config_app.app }}"
+      ansible.builtin.uri:
+        url: "{{ arr_config_api }}/rootfolder"
+        headers:
+          X-Api-Key: "{{ arr_config_api_key }}"
+        timeout: "{{ arr_config_timeout }}"
+      register: arr_config_roots
+      until: arr_config_roots.status == 200
+      retries: 3
+      delay: 5
+      failed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: "Check GET root folders succeeded | {{ arr_config_app.app }}"
+      ansible.builtin.assert:
+        that: arr_config_roots.status == 200
+        fail_msg: >-
+          {{ arr_config_app.app }}: GET {{ arr_config_api }}/rootfolder -> {{ arr_config_roots.status }}
+          {{ arr_config_roots.msg | default('') }}{{ ' (API key rejected: the 1Password key must match the
+          one the container gets from secrets.env)' if arr_config_roots.status == 401 else '' }}
+        quiet: true
+
+    - name: "Find missing root folders | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        # A configured path matches with or without a trailing "/" on either side.
+        arr_config_missing: >-
+          {{ arr_config_app.folders
+             | rejectattr('path', 'in', arr_config_have | union(arr_config_have | map('regex_replace', '$', '/')))
+             | list }}
+      vars:
+        arr_config_have: "{{ arr_config_roots.json | map(attribute='path') | map('regex_replace', '/+$', '') | list }}"
+
+    - name: "Report root folders | {{ arr_config_app.app }}"
+      ansible.builtin.debug:
+        msg: >-
+          {{ arr_config_app.app }}: present
+          {{ arr_config_roots.json | map(attribute='path') | zip(arr_config_roots.json | map(attribute='accessible'))
+             | map('join', ' accessible=') | list }},
+          missing {{ arr_config_missing | map(attribute='path') | list }}
+
+    - name: "Warn about inaccessible root folders | {{ arr_config_app.app }}"
+      ansible.builtin.debug:
+        msg: >-
+          WARNING {{ arr_config_app.app }}: root folders not accessible by the app (permissions /
+          PUID {{ media_puid }}?): {{ arr_config_roots.json | rejectattr('accessible') | map(attribute='path') | list }}
+      when: arr_config_roots.json | rejectattr('accessible') | list | length > 0
+
+    - name: "GET profiles for new root folders | {{ arr_config_app.app }}"
+      ansible.builtin.uri:
+        url: "{{ arr_config_api }}/{{ item.value.endpoint }}"
+        headers:
+          X-Api-Key: "{{ arr_config_api_key }}"
+        timeout: "{{ arr_config_timeout }}"
+      loop: "{{ arr_config_extra.profiles | default({}) | dict2items }}"
+      register: arr_config_profiles
+      failed_when: false
+      check_mode: false
+      no_log: true
+      when: arr_config_missing | length > 0
+
+    - name: "Check GET profiles succeeded | {{ arr_config_app.app }}"
+      ansible.builtin.assert:
+        that: item.status | default(-1) == 200
+        fail_msg: >-
+          {{ arr_config_app.app }}: GET {{ arr_config_api }}/{{ item.item.value.endpoint }} ->
+          {{ item.status | default(-1) }} {{ item.msg | default('') }}
+        quiet: true
+      loop: "{{ arr_config_profiles.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.value.endpoint }}"
+
+    - name: "Start with no profile ids | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        arr_config_profile_ids: {}
+
+    # Profiles named item.item.value.name first, then all by id: the first entry is the pick.
+    - name: "Resolve profile ids (by name, else lowest id) | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        arr_config_profile_ids: >-
+          {{ arr_config_profile_ids | combine({item.item.key: arr_config_pick | map(attribute='id') | first}) }}
+      vars:
+        arr_config_pick: >-
+          {{ (item.json | selectattr('name', 'equalto', item.item.value.name) | list)
+             + (item.json | sort(attribute='id')) }}
+      loop: "{{ arr_config_profiles.results | default([]) | selectattr('json', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      when: arr_config_pick | length > 0
+
+    - name: "Check every needed profile exists | {{ arr_config_app.app }}"
+      ansible.builtin.assert:
+        that: (arr_config_extra.profiles | default({}) | difference(arr_config_profile_ids)) | length == 0
+        fail_msg: >-
+          {{ arr_config_app.app }}: no profile found for
+          {{ arr_config_extra.profiles | default({}) | difference(arr_config_profile_ids) }}
+        quiet: true
+      when: arr_config_missing | length > 0
+
+    - name: "POST missing root folders | {{ arr_config_app.app }}"
+      ansible.builtin.uri:
+        url: "{{ arr_config_api }}/rootfolder"
+        method: POST
+        headers:
+          X-Api-Key: "{{ arr_config_api_key }}"
+        body_format: json
+        body: "{{ arr_config_extra.body | default({}) | combine(item, arr_config_profile_ids) }}"
+        status_code: [200, 201]
+        return_content: true
+        timeout: "{{ arr_config_timeout }}"
+      loop: "{{ arr_config_missing }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: arr_config_post
+      changed_when: arr_config_post.status | default(-1) in [200, 201]
+      failed_when: false
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: "Check POST root folders succeeded | {{ arr_config_app.app }}"
+      ansible.builtin.assert:
+        that: item.status | default(-1) in [200, 201]
+        fail_msg: >-
+          {{ arr_config_app.app }}: POST {{ item.item.path }} -> {{ item.status | default(-1) }}
+          {{ item.json | default(item.msg | default('')) }}. A 400 usually means the folder does not
+          exist in the container or is not writable by PUID/PGID {{ media_puid }}:{{ media_pgid }}.
+        quiet: true
+      loop: "{{ arr_config_post.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      when: not ansible_check_mode
+
+    - name: "Would add root folders (check mode) | {{ arr_config_app.app }}"
+      ansible.builtin.debug:
+        msg: "{{ arr_config_app.app }}: would POST {{ item.path }}"
+      loop: "{{ arr_config_missing }}"
+      loop_control:
+        label: "{{ item.path }}"
+      changed_when: true
+      when: ansible_check_mode
+
+  rescue:
+    - name: "Record failure and go on with the next app | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        arr_config_failed: >-
+          {{ arr_config_failed
+             + ((ansible_failed_result.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list)
+                or [ansible_failed_result.msg | default('failed in task ' ~ ansible_failed_task.name)]) }}
+
+  always:
+    - name: "Forget API key | {{ arr_config_app.app }}"
+      ansible.builtin.set_fact:
+        arr_config_api_key: ""
+        arr_config_profile_ids: {}
+      no_log: true

@@ -20,9 +20,9 @@
 |---|---|---|
 | Music | `/data/media/music` | quality profile `Any`, metadata profile `Standard` (first of each if missing) |
 
-`./configure.sh` adds it through `/api/v1/rootfolder` only if missing (rerun is a no-op);
-`./configure.sh status` lists the root folders. The key comes from `LIDARR_API_KEY`, else
-`op read`, else `<ApiKey>` in the VM's `config.xml` over ssh.
+`ansible-playbook playbooks/arr-config.yml` (from `ansible/`, role `arr_config`) adds it through
+`/api/v1/rootfolder` only if missing (rerun is a no-op) and prints the root folders present. The key
+comes from 1Password (`op://<vault>/media-stack/lidarr_api_key`).
 
 ## Download client (qBittorrent)
 

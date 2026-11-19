@@ -20,8 +20,9 @@ the stack-skeleton unit. Validate this service alone with:
 - `secrets.env.tpl`: `RADARR__AUTH__APIKEY` as an `op://` reference. `deploy.sh` renders it with
   `op inject` into `secrets.env` (mode 600) on the VM. That file is git-ignored and optional: without
   it Radarr generates its own key on first start (stored in `config.xml`).
-- `configure.sh`: idempotent API setup (adds the root folder). Run it from the Mac after the container
-  is healthy: `stack/radarr/configure.sh`. See its header for env overrides.
+- Root folder `/data/media/movies`: added through the API, only if missing, by the Ansible playbook
+  `ansible/playbooks/arr-config.yml` (role `arr_config`). Run it from the Mac in `ansible/` after the
+  container is healthy: `ansible-playbook playbooks/arr-config.yml`. See its header.
 
 ## Auth
 

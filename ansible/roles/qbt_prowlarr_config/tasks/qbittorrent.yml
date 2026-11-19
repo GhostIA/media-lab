@@ -1,0 +1,213 @@
+---
+# qBittorrent WebUI API v2: permanent WebUI password, preferences, categories.
+# Never changes the password when the 1Password one already works.
+
+# Each failed login counts towards qBittorrent's IP ban (5 by default), so only the password that can
+# work is tried: the permanent one when qBittorrent.conf holds a password hash (or that can't be
+# checked), the temporary one from the container log when it holds none.
+- name: Check whether a WebUI password is saved in qBittorrent.conf
+  ansible.builtin.command:
+    # prints yes/no from inside the container, so a docker error (container down) is told apart
+    argv:
+      - docker
+      - exec
+      - "{{ qbt_prowlarr_config_qbt_container }}"
+      - sh
+      - -c
+      - grep -Eq '^(WebUI\\)?Password_PBKDF2=' /config/qBittorrent/qBittorrent.conf && echo yes || echo no
+  register: qbt_prowlarr_config_pw_conf
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  delegate_to: "{{ groups['media_vms'] | first }}"
+
+- name: Remember whether the permanent password is set (set / unset / unknown)
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_pw_state: >-
+      {{ {'yes': 'set', 'no': 'unset'}[qbt_prowlarr_config_pw_conf.stdout | default('') | trim] | default('unknown') }}
+    qbt_prowlarr_config_qbt_logged_in: false
+
+- name: Log in with the permanent WebUI password
+  ansible.builtin.include_tasks: qbt_login.yml
+  vars:
+    qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_secrets.qbittorrent_password }}"
+  when: qbt_prowlarr_config_pw_state != 'unset'
+
+- name: Fail when the permanent password is rejected although one is set
+  ansible.builtin.fail:
+    msg: >-
+      qBittorrent rejected the password from 1Password ({{ qbt_prowlarr_config_op_item }}/qbittorrent_password)
+      although a WebUI password is set. Not retrying (IP ban after 5 failures).
+  when: qbt_prowlarr_config_pw_state == 'set' and not qbt_prowlarr_config_qbt_logged_in
+
+# a block's `when` is re-evaluated for every task inside it, so freeze the decision first
+- name: Decide whether this is a fresh install (no usable permanent password)
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_fresh_install: "{{ not qbt_prowlarr_config_qbt_logged_in }}"
+
+- name: Fresh install - set the permanent WebUI password from the temporary one
+  when: qbt_prowlarr_config_fresh_install
+  block:
+    # qBittorrent prints a temporary password only while no password is set; read only the
+    # current container run so a stale one never costs a failed login (5 failures = IP ban)
+    - name: Read the start time of the current qBittorrent container run
+      ansible.builtin.command:
+        argv: [docker, inspect, -f, "{% raw %}{{.State.StartedAt}}{% endraw %}", "{{ qbt_prowlarr_config_qbt_container }}"]
+      register: qbt_prowlarr_config_started
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ groups['media_vms'] | first }}"
+
+    - name: Read the temporary WebUI password from the container log
+      ansible.builtin.command:
+        argv: [docker, logs, --since, "{{ qbt_prowlarr_config_started.stdout | trim }}", "{{ qbt_prowlarr_config_qbt_container }}"]
+      register: qbt_prowlarr_config_logs
+      changed_when: false
+      check_mode: false
+      become: true
+      delegate_to: "{{ groups['media_vms'] | first }}"
+      no_log: true
+
+    - name: Extract the temporary WebUI password
+      ansible.builtin.set_fact:
+        qbt_prowlarr_config_qbt_temp_password: >-
+          {{ ((qbt_prowlarr_config_logs.stdout ~ '\n' ~ qbt_prowlarr_config_logs.stderr)
+              | regex_findall('temporary password is provided for this session: *(\S+)') | last | default('')) }}
+      no_log: true
+
+    - name: Fail when there is no temporary password to log in with
+      ansible.builtin.fail:
+        msg: >-
+          Cannot log in to qBittorrent: no permanent password is set (or the 1Password one was rejected)
+          and the current container run printed no temporary password.
+      when: qbt_prowlarr_config_qbt_temp_password | length == 0
+
+    - name: Log in with the temporary WebUI password
+      ansible.builtin.include_tasks: qbt_login.yml
+      vars:
+        qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_qbt_temp_password }}"
+
+    - name: Fail when the temporary password is rejected
+      ansible.builtin.fail:
+        msg: qBittorrent rejected the temporary password from the container log.
+      when: not qbt_prowlarr_config_qbt_logged_in
+
+    - name: Set the permanent WebUI password
+      ansible.builtin.uri:
+        url: "{{ qbt_prowlarr_config_qbt_url }}/api/v2/app/setPreferences"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          json: "{{ {'web_ui_password': qbt_prowlarr_config_secrets.qbittorrent_password} | to_json }}"
+        headers:
+          Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+          Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
+        status_code: [200, 204]
+      changed_when: true
+      no_log: true
+
+    - name: Log in again with the permanent WebUI password
+      ansible.builtin.include_tasks: qbt_login.yml
+      vars:
+        qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_secrets.qbittorrent_password }}"
+      when: not ansible_check_mode
+
+    - name: Fail when the new permanent password is rejected
+      ansible.builtin.fail:
+        msg: The permanent WebUI password was set but logging in with it failed.
+      when: not qbt_prowlarr_config_qbt_logged_in
+
+- name: Read qBittorrent preferences
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_qbt_url }}/api/v2/app/preferences"
+    headers:
+      Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+      Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
+  register: qbt_prowlarr_config_prefs
+  check_mode: false
+  no_log: true   # the cookie header; preferences can also hold proxy/mail credentials
+
+- name: Compute the preferences that differ from the wanted ones
+  ansible.builtin.set_fact:
+    # qBittorrent may report save_path with a trailing slash
+    qbt_prowlarr_config_prefs_diff: >-
+      {{ qbt_prowlarr_config_qbt_prefs | dict2items
+         | difference(qbt_prowlarr_config_prefs.json
+                      | combine({'save_path': qbt_prowlarr_config_prefs.json.save_path | default('') | regex_replace('/+$', '')})
+                      | dict2items)
+         | items2dict }}
+
+- name: Report the preferences that would be set (check mode)
+  ansible.builtin.debug:
+    msg: "would set: {{ qbt_prowlarr_config_prefs_diff }}"
+  when: ansible_check_mode and qbt_prowlarr_config_prefs_diff | length > 0
+  changed_when: true
+
+- name: Set qBittorrent preferences
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_qbt_url }}/api/v2/app/setPreferences"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      json: "{{ qbt_prowlarr_config_prefs_diff | to_json }}"
+    headers:
+      Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+      Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
+    status_code: [200, 204]
+  when: qbt_prowlarr_config_prefs_diff | length > 0
+  changed_when: true
+  no_log: true   # cookie header; the changed keys are shown by the compute task with -v
+
+- name: Read qBittorrent categories
+  ansible.builtin.uri:
+    url: "{{ qbt_prowlarr_config_qbt_url }}/api/v2/torrents/categories"
+    headers:
+      Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+      Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
+  register: qbt_prowlarr_config_cats
+  check_mode: false
+  no_log: true
+
+- name: List the categories that are missing or have another savePath
+  ansible.builtin.set_fact:
+    qbt_prowlarr_config_cats_todo: >-
+      {{ qbt_prowlarr_config_qbt_categories
+         | zip(qbt_prowlarr_config_qbt_categories | map('regex_replace', '^', qbt_prowlarr_config_qbt_save_root ~ '/'))
+         | map('join', '=')
+         | reject('in', qbt_prowlarr_config_cats_have)
+         | map('regex_replace', '=.*$', '') | list }}
+  vars:
+    # "<name>=<savePath without trailing slash>" for every existing category; other categories
+    # (e.g. `prowlarr`, created by Prowlarr's download-client test) are left alone
+    qbt_prowlarr_config_cats_have: >-
+      {{ qbt_prowlarr_config_cats.json | dict2items | map(attribute='key')
+         | zip(qbt_prowlarr_config_cats.json | dict2items | map(attribute='value.savePath', default='')
+               | map('regex_replace', '/+$', ''))
+         | map('join', '=') | list }}
+
+- name: Report the categories that would be created or fixed (check mode)
+  ansible.builtin.debug:
+    msg: "would create/fix category {{ item }} -> {{ qbt_prowlarr_config_qbt_save_root }}/{{ item }}"
+  loop: "{{ qbt_prowlarr_config_cats_todo if ansible_check_mode else [] }}"
+  changed_when: true
+
+- name: Create or fix categories (savePath <save root>/<category>)
+  ansible.builtin.uri:
+    url: >-
+      {{ qbt_prowlarr_config_qbt_url }}/api/v2/torrents/{{ 'editCategory' if item in qbt_prowlarr_config_cats.json else 'createCategory' }}
+    method: POST
+    body_format: form-urlencoded
+    body:
+      category: "{{ item }}"
+      savePath: "{{ qbt_prowlarr_config_qbt_save_root }}/{{ item }}"
+    headers:
+      Referer: "{{ qbt_prowlarr_config_qbt_url }}"
+      Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
+    status_code: [200, 204]
+  loop: "{{ qbt_prowlarr_config_cats_todo }}"
+  loop_control:
+    label: "{{ item }}"
+  no_log: true   # session cookie header
+  changed_when: true

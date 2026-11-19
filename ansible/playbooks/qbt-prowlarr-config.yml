@@ -1,0 +1,20 @@
+---
+# Configure qBittorrent and Prowlarr on the media stack (VM 200) through their HTTP APIs.
+# Replaces stack/qbittorrent/configure.sh and stack/prowlarr/configure.sh. Idempotent: only creates or
+# updates what is missing or different; never restarts containers.
+#
+#   qBittorrent: permanent WebUI password (only on a fresh install: logs in with the temporary password
+#                from `docker logs qbittorrent` on the VM), save_path /data/torrents, no incomplete dir,
+#                Automatic Torrent Management, categories {{ media_categories }} -> /data/torrents/<cat>
+#   Prowlarr:    applications Sonarr/Radarr/Lidarr (full sync) and the qBittorrent download client;
+#                services that do not answer are skipped
+#
+# Runs on the controller; credentials come from 1Password item media-stack (`op` signed in).
+# usage (from ansible/):
+#   ansible-playbook playbooks/qbt-prowlarr-config.yml [--check --diff]
+#   ansible-playbook playbooks/qbt-prowlarr-config.yml --tags qbittorrent   # or --tags prowlarr
+- name: Configure qBittorrent and Prowlarr
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: qbt_prowlarr_config

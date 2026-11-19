@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: >-
+    Media stack VM host: Docker CE, qemu-guest-agent, ext4 /data on the data disk (format only
+    when blank), docker requires the /data mount, TRaSH /data tree and /opt/media-stack.
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

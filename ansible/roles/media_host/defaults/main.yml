@@ -1,0 +1,35 @@
+---
+# Everything defaults to the shared group_vars (group_vars/all.yml); the fallbacks only keep the
+# role usable on its own.
+media_host_user: "{{ ansible_user | default('media') }}"   # added to the docker group
+media_host_data_root: "{{ media_data_root | default('/data') }}"
+media_host_config_root: "{{ media_config_root | default('/opt/media-stack/config') }}"
+media_host_stack_root: "{{ media_stack_root | default('/opt/media-stack/stack') }}"
+media_host_puid: "{{ media_puid | default(1000) }}"
+media_host_pgid: "{{ media_pgid | default(1000) }}"
+media_host_categories: "{{ media_categories | default(['movies', 'tv', 'anime', 'music']) }}"
+
+# PVE scsi1 = the 3T data disk on media-ec. The by-id name is fixed by QEMU (drive-scsi1), so it
+# cannot be confused with the OS disk (drive-scsi0) the way /dev/sdX can.
+media_host_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+media_host_data_label: data
+media_host_data_mount_opts: defaults,noatime,nofail,x-systemd.device-timeout=30s
+
+media_host_docker_repo_url: https://download.docker.com/linux/debian
+media_host_docker_gpg_url: https://download.docker.com/linux/debian/gpg
+media_host_docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+media_host_base_packages:
+  - ca-certificates
+  - curl
+  - qemu-guest-agent
+  - rsync   # stack deploy (playbooks/media-stack.yml) syncs stack/ with rsync
+
+# ansible_facts.architecture -> dpkg architecture
+media_host_dpkg_arch_map:
+  x86_64: amd64
+  aarch64: arm64

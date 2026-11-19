@@ -1,0 +1,6 @@
+---
+# Only a daemon-reload: the docker drop-in adds a mount dependency, which takes effect without
+# restarting docker (and the running containers).
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

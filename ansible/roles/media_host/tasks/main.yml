@@ -1,0 +1,21 @@
+---
+# media_host: replaces the `bootstrap` phase of pve-tools/vm-media-stack.sh.
+# Order: data disk and the docker -> /data dependency first, so on a fresh VM docker never starts
+# against an empty /data on the OS disk; then packages and services; then the directory tree.
+- name: Wait for cloud-init to finish first-boot setup
+  ansible.builtin.command: cloud-init status --wait
+  args:
+    removes: /usr/bin/cloud-init
+  register: media_host_cloud_init
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Data disk
+  ansible.builtin.import_tasks: data_disk.yml
+
+- name: Packages and services
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Directory tree
+  ansible.builtin.import_tasks: dirs.yml

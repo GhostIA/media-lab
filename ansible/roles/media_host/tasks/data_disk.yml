@@ -1,0 +1,138 @@
+---
+# The data disk is formatted ONLY when `blkid -p` finds no signature at all (exit 2: no
+# filesystem, no partition table). Any other result leaves the disk untouched.
+- name: Look up the data disk by-id link
+  ansible.builtin.stat:
+    path: "{{ media_host_data_disk }}"
+    follow: false
+  register: media_host_disk_link
+
+- name: Look up the data disk device
+  ansible.builtin.stat:
+    path: "{{ media_host_disk_link.stat.lnk_source | default(media_host_data_disk) }}"
+  register: media_host_disk_dev
+
+- name: Check the data disk exists and is not the root disk
+  vars:
+    media_host_root_dev: >-
+      {{ (ansible_facts.mounts | default([]) | selectattr('mount', 'equalto', '/')
+          | first | default({})).device | default('') }}
+  ansible.builtin.assert:
+    that:
+      - media_host_root_dev | length > 0
+      - media_host_disk_dev.stat.exists
+      - media_host_disk_dev.stat.isblk
+      - not media_host_root_dev.startswith(media_host_disk_dev.stat.path)
+    fail_msg: >-
+      {{ media_host_data_disk }} ({{ media_host_disk_dev.stat.path }}) is missing, not a block
+      device, or backs / ({{ media_host_root_dev }}); refusing to touch it
+    quiet: true
+
+- name: Probe the data disk for any signature
+  ansible.builtin.command: blkid -p {{ media_host_disk_dev.stat.path }}
+  register: media_host_disk_probe
+  changed_when: false
+  failed_when: media_host_disk_probe.rc not in [0, 2]   # 0 = signature found, 2 = blank
+  check_mode: false
+
+- name: Format the blank data disk as ext4
+  community.general.filesystem:
+    dev: "{{ media_host_disk_dev.stat.path }}"
+    fstype: ext4
+    opts: -L {{ media_host_data_label }} -m 0 -E nodiscard
+    force: false
+  when: media_host_disk_probe.rc == 2
+
+- name: Read the data disk filesystem
+  ansible.builtin.command: blkid -o export {{ media_host_disk_dev.stat.path }}
+  register: media_host_disk_blkid
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse the data disk filesystem
+  ansible.builtin.set_fact:
+    media_host_data_fs: >-
+      {{ dict(media_host_disk_blkid.stdout_lines | select('search', '=')
+              | map('split', '=', 1) | list) }}
+
+- name: Check the data disk is ext4
+  ansible.builtin.assert:
+    that:
+      - media_host_data_fs.TYPE | default('') == 'ext4'
+      - media_host_data_fs.UUID | default('') | length > 0
+    fail_msg: "{{ media_host_data_disk }} is not ext4 ({{ media_host_data_fs }}), refusing to mount it"
+    quiet: true
+  # in check mode a blank disk was not really formatted yet
+  when: not (ansible_check_mode and media_host_disk_probe.rc == 2)
+
+- name: Mount the data disk
+  when: media_host_data_fs.UUID is defined
+  block:
+    - name: Read /etc/fstab
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: media_host_fstab
+
+    - name: Check /etc/fstab has no other entry for the data mount
+      vars:
+        media_host_other_entries: >-
+          {{ (media_host_fstab.content | b64decode).splitlines()
+             | reject('match', '^\s*#')
+             | select('match', '^\s*\S+\s+' ~ (media_host_data_root | regex_escape) ~ '/?\s')
+             | reject('match', '^\s*UUID=' ~ media_host_data_fs.UUID ~ '\s')
+             | list }}
+      ansible.builtin.assert:
+        that: media_host_other_entries | length == 0
+        fail_msg: "/etc/fstab already has another {{ media_host_data_root }} entry: {{ media_host_other_entries }}"
+        quiet: true
+
+    - name: Add the data disk to /etc/fstab by UUID (nofail keeps the VM bootable without it)
+      ansible.posix.mount:
+        path: "{{ media_host_data_root }}"
+        src: UUID={{ media_host_data_fs.UUID }}
+        fstype: ext4
+        opts: "{{ media_host_data_mount_opts }}"
+        dump: "0"
+        passno: "2"
+        state: present
+      register: media_host_fstab_entry
+
+    - name: Reload systemd so it sees the new fstab entry before mounting   # noqa: no-handler
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: media_host_fstab_entry is changed
+
+    - name: Mount the data disk
+      ansible.posix.mount:
+        path: "{{ media_host_data_root }}"
+        src: UUID={{ media_host_data_fs.UUID }}
+        fstype: ext4
+        opts: "{{ media_host_data_mount_opts }}"
+        dump: "0"
+        passno: "2"
+        state: mounted
+
+# nofail keeps the VM reachable over SSH without the data disk, but containers must never start
+# against the empty mountpoint on the OS disk: docker requires the mount.
+- name: Create the docker.service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Make docker.service require the data mount
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker.service.d/require-data.conf
+    content: |
+      [Unit]
+      RequiresMountsFor={{ media_host_data_root }}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Apply systemd changes before docker is installed or started
+  ansible.builtin.meta: flush_handlers

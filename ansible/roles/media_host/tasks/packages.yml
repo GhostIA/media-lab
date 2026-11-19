@@ -1,0 +1,77 @@
+---
+# Docker CE from the official Docker apt repo, in the same files the old script wrote
+# (/etc/apt/keyrings/docker.asc + deb822 /etc/apt/sources.list.d/docker.sources).
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ media_host_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the Docker apt key
+  ansible.builtin.get_url:
+    url: "{{ media_host_docker_gpg_url }}"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+  register: media_host_docker_key
+
+- name: Add the Docker apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.sources
+    content: |
+      Types: deb
+      URIs: {{ media_host_docker_repo_url }}
+      Suites: {{ ansible_facts.distribution_release }}
+      Components: stable
+      Architectures: {{ media_host_dpkg_arch_map[ansible_facts.architecture] | default(ansible_facts.architecture) }}
+      Signed-By: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+  register: media_host_docker_repo
+
+- name: Install Docker CE and the compose plugin
+  ansible.builtin.apt:
+    name: "{{ media_host_docker_packages }}"
+    state: present
+    # refresh when the repo changed, or while a package is still missing (e.g. a rerun after a
+    # failed first run, when cache_valid_time above skipped the update)
+    update_cache: >-
+      {{ media_host_docker_key is changed or media_host_docker_repo is changed
+         or (media_host_docker_packages | difference(ansible_facts.packages.keys()) | length > 0) }}
+
+# The `when`s below only matter in check mode on a fresh VM, where nothing was really installed.
+- name: Enable and start docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+  when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages
+
+# static unit, started by udev when the virtio port appears; just make sure it runs
+- name: Start qemu-guest-agent
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    state: started
+  when: not ansible_check_mode or 'qemu-guest-agent' in ansible_facts.packages
+
+- name: Add the media user to the docker group
+  ansible.builtin.user:
+    name: "{{ media_host_user }}"
+    groups: docker
+    append: true
+  when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages

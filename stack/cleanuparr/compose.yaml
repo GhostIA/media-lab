@@ -1,0 +1,27 @@
+# Cleanuparr: cleans up the download queue. Removes stalled/slow/stuck, malware-flagged and
+# failed-import downloads from qBittorrent and the *arrs (so they search again), and seeded/orphaned
+# downloads. Merged into the media-stack project by ansible/playbooks/media-stack.yml.
+# /data is mounted at the same path as qBittorrent so the orphan/"no hardlinks" cleaner sees the same
+# files. Host paths come only from the shared env; see stack/cleanuparr/README.md.
+services:
+  cleanuparr:
+    image: ghcr.io/cleanuparr/cleanuparr:2.11.1
+    container_name: cleanuparr
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      UMASK: ${UMASK:-002}
+      TZ: ${TZ:-America/Chicago}
+      PORT: 11011
+    ports:
+      - "11011:11011"    # web UI (own port, ready for a later OIDC proxy)
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/cleanuparr:/config
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:11011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

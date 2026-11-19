@@ -1,0 +1,215 @@
+---
+# PVE API user + token for Terraform (terraform/ manages VM 200).
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/pve-terraform-token.yml --check --diff
+#   ansible-playbook playbooks/pve-terraform-token.yml
+#
+# Creates, on the API node (cluster-wide, /etc/pve is shared):
+#   - user  terraform@pve (no password: token-only)
+#   - role  TerraformVM   (VM 200, its disks + cloud-init drive, the image) on /vms/<vmid>,
+#           /storage/<ceph_pool>, /storage/local and /sdn/zones/localnetwork (SDN.Use for vmbr0)
+#   - role  TerraformNode (Sys.Audit + Sys.AccessNetwork, what download-url needs besides
+#           Datastore.AllocateTemplate; avoids the much broader Sys.Modify) on /nodes/<vm node>
+#   - every ACL of terraform@pve that is not in this list is removed (propagate=1 enforced)
+#   - token terraform@pve!media (privsep=0: the token has exactly the user's ACLs)
+#
+# The token secret is shown only once. It is created ONLY when the 1Password item
+# "pve-terraform" (vault op_vault) does not exist, and is stored there right away
+# (fields token_id, token_secret, endpoint, plus api_token = "<token_id>=<secret>", the
+# PROXMOX_VE_API_TOKEN format, because `op run` cannot join two references).
+# If the token exists but the item does not (or the reverse), the play fails with instructions instead of regenerating anything.
+# Requires: `op` CLI signed in on the control machine. Rerun = changed=0.
+
+- name: Terraform API user and token
+  # pve_api_node is an inventory var, which `hosts:` cannot template: select it in the play.
+  hosts: pve_nodes
+  gather_facts: false
+  vars:
+    tf_user: terraform@pve
+    tf_token_name: media
+    tf_op_item: pve-terraform
+    tf_endpoint: "https://{{ pve_api_host }}:8006/"
+    tf_roles:
+      TerraformVM:
+        - Datastore.AllocateSpace
+        - Datastore.AllocateTemplate
+        - Datastore.Audit
+        - Pool.Audit
+        - SDN.Use
+        - VM.Allocate
+        - VM.Audit
+        - VM.Config.CDROM
+        - VM.Config.CPU
+        - VM.Config.Cloudinit
+        - VM.Config.Disk
+        - VM.Config.HWType
+        - VM.Config.Memory
+        - VM.Config.Network
+        - VM.Config.Options
+        - VM.GuestAgent.Audit
+        - VM.Migrate
+        - VM.PowerMgmt
+      TerraformNode:
+        - Sys.AccessNetwork
+        - Sys.Audit
+    # same shape as `pveum acl list --output-format json` entries, so they compare directly
+    tf_acls_want:
+      - {path: "/vms/{{ media_vm.vmid }}", roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      - {path: "/storage/{{ ceph_pool }}", roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      - {path: /storage/local, roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      - {path: /sdn/zones/localnetwork, roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      - {path: "/nodes/{{ media_vm.node }}", roleid: TerraformNode, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+  tasks:
+    - name: Run on the API node only ({{ pve_api_node }})
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != pve_api_node
+
+    - name: Read PVE users
+      ansible.builtin.command: pveum user list --output-format json
+      register: tf_users
+      changed_when: false
+      check_mode: false
+
+    - name: Create user {{ tf_user }}
+      ansible.builtin.command:
+        argv: [pveum, user, add, "{{ tf_user }}", --comment, "Terraform (terraform/ in media-lab)"]
+      when: tf_user not in (tf_users.stdout | from_json | map(attribute='userid') | list)
+      changed_when: true
+
+    - name: Read PVE roles
+      ansible.builtin.command: pveum role list --output-format json
+      register: tf_roles_cur
+      changed_when: false
+      check_mode: false
+
+    - name: Create or update the terraform roles
+      vars:
+        tf_role_cur: "{{ tf_roles_cur.stdout | from_json | selectattr('roleid', 'equalto', item.key) | list }}"
+        tf_privs_cur: "{{ (tf_role_cur[0].privs | default('')).split(',') | select | sort }}"
+      ansible.builtin.command:
+        argv: [pveum, role, "{{ 'modify' if tf_role_cur else 'add' }}", "{{ item.key }}", --privs, "{{ item.value | sort | join(',') }}"]
+      loop: "{{ tf_roles | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: tf_role_cur | length == 0 or tf_privs_cur != (item.value | sort)
+      changed_when: true
+
+    - name: Read ACLs
+      ansible.builtin.command: pveum acl list --output-format json
+      register: tf_acls
+      changed_when: false
+      check_mode: false
+
+    - name: Collect current ACLs of the terraform user
+      ansible.builtin.set_fact:
+        tf_acls_have: >-
+          {{ tf_acls.stdout | from_json | selectattr('type', 'equalto', 'user')
+             | selectattr('ugid', 'equalto', tf_user) | list }}
+
+    - name: Grant the roles to the terraform user
+      ansible.builtin.command:
+        argv: [pveum, acl, modify, "{{ item.path }}", --users, "{{ tf_user }}", --roles, "{{ item.roleid }}", --propagate, "1"]
+      loop: "{{ tf_acls_want | difference(tf_acls_have) }}"
+      changed_when: true
+
+    - name: Remove ACLs of the terraform user that are not wanted
+      ansible.builtin.command:
+        argv: [pveum, acl, delete, "{{ item.path }}", --users, "{{ tf_user }}", --roles, "{{ item.roleid }}"]
+      loop: "{{ tf_acls_have | difference(tf_acls_want) }}"
+      # an entry that only differs in propagate was re-granted above, keep it
+      when: >-
+        tf_acls_want | selectattr('path', 'equalto', item.path)
+        | selectattr('roleid', 'equalto', item.roleid) | list | length == 0
+      changed_when: true
+
+    - name: Read tokens of {{ tf_user }}
+      ansible.builtin.command:
+        argv: [pveum, user, token, list, "{{ tf_user }}", --output-format, json]
+      register: tf_tokens
+      changed_when: false
+      check_mode: false
+      # the user does not exist yet in check mode on a fresh cluster
+      failed_when: tf_tokens.rc != 0 and not ansible_check_mode
+
+    - name: Check for 1Password item {{ tf_op_item }}
+      ansible.builtin.command:
+        argv: [op, item, get, "{{ tf_op_item }}", --vault, "{{ op_vault }}", --fields, label=token_id]
+      delegate_to: localhost
+      register: tf_item
+      changed_when: false
+      check_mode: false
+      # only "no such item" means missing; a signed-out op, a duplicate title etc. must stop the play
+      failed_when: tf_item.rc != 0 and "isn't an item" not in tf_item.stderr
+
+    - name: Decide what to do with the token
+      ansible.builtin.set_fact:
+        tf_token_exists: >-
+          {{ tf_tokens.rc == 0 and tf_token_name in (tf_tokens.stdout | from_json | map(attribute='tokenid') | list) }}
+        tf_item_exists: "{{ tf_item.rc == 0 }}"
+
+    - name: Refuse to regenerate silently (token exists, 1Password item missing)
+      ansible.builtin.fail:
+        msg: >-
+          Token {{ tf_user }}!{{ tf_token_name }} exists but 1Password item '{{ tf_op_item }}'
+          (vault {{ op_vault }}) does not, and PVE never shows a token secret twice.
+          If the secret is lost, delete the token on {{ inventory_hostname }}
+          (pveum user token remove {{ tf_user }} {{ tf_token_name }}) and rerun this playbook
+          to create a new one and store it in 1Password.
+      when: tf_token_exists and not tf_item_exists
+
+    - name: Refuse to use a stale secret (1Password item exists, token missing)
+      ansible.builtin.fail:
+        msg: >-
+          1Password item '{{ tf_op_item }}' (vault {{ op_vault }}) exists but token
+          {{ tf_user }}!{{ tf_token_name }} does not, so the stored secret is stale.
+          Archive or delete the item (op item delete {{ tf_op_item }} --vault {{ op_vault }} --archive)
+          and rerun this playbook.
+      when: not tf_token_exists and tf_item_exists and not ansible_check_mode
+
+    - name: Create token and store it in 1Password
+      when: not tf_token_exists and not tf_item_exists
+      block:
+        - name: Create the terraform API token
+          ansible.builtin.command:
+            argv: [pveum, user, token, add, "{{ tf_user }}", "{{ tf_token_name }}", --privsep, "0",
+                   --comment, "Terraform VM 200", --output-format, json]
+          register: tf_new_token
+          changed_when: true
+          no_log: true
+
+        - name: Store token in 1Password item {{ tf_op_item }}
+          ansible.builtin.command:
+            # JSON template on stdin: the secret never appears in argv or in logs
+            argv: [op, item, create, --vault, "{{ op_vault }}", --format, json, "-"]
+            stdin: >-
+              {{ {'title': tf_op_item, 'category': 'API_CREDENTIAL',
+                  'fields': [
+                    {'id': 'token_id', 'label': 'token_id', 'type': 'STRING',
+                     'value': (tf_new_token.stdout | from_json)['full-tokenid']},
+                    {'id': 'token_secret', 'label': 'token_secret', 'type': 'CONCEALED',
+                     'value': (tf_new_token.stdout | from_json)['value']},
+                    {'id': 'api_token', 'label': 'api_token', 'type': 'CONCEALED',
+                     'value': (tf_new_token.stdout | from_json)['full-tokenid'] ~ '='
+                              ~ (tf_new_token.stdout | from_json)['value']},
+                    {'id': 'endpoint', 'label': 'endpoint', 'type': 'STRING', 'value': tf_endpoint}]}
+                 | to_json }}
+          delegate_to: localhost
+          changed_when: true
+          no_log: true
+          when: not ansible_check_mode
+      rescue:
+        - name: Remove the token whose secret could not be stored
+          ansible.builtin.command:
+            argv: [pveum, user, token, remove, "{{ tf_user }}", "{{ tf_token_name }}"]
+          changed_when: true
+          when: tf_new_token is defined and tf_new_token is succeeded
+
+        - name: Report the failure
+          ansible.builtin.fail:
+            # the failed tasks are no_log, so name the task instead of echoing its result
+            msg: >-
+              Task '{{ ansible_failed_task.name }}' failed (output hidden: no_log).
+              {{ 'The new token was removed again, so nothing is left half-done; fix op (signed in?) and rerun.'
+                 if (tf_new_token is defined and tf_new_token is succeeded)
+                 else 'No token was created; run the pveum command by hand to see the error.' }}

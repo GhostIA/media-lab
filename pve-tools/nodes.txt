@@ -1,0 +1,6 @@
+# name            ip              1password-item-id
+intel-1ecbc8      192.168.8.234   33v7cdvlzo66olggj7a6kqrzpu
+intel-a163f8      192.168.8.123   222r6wnw7ulxzulw5frmmn6gky
+intel-177e78      192.168.8.162   qfq6hbnnr4ywjhjh4c3qpete5u
+intel-91c45d      192.168.8.196   asqchyk3yciskkqtn2y557g37u
+intel-d1babf      192.168.8.194   yexxnovydg5lge77s3y4x2ziua

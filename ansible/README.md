@@ -60,7 +60,7 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 | `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, data disk (formatted **only if blank and confirmed** with `-e confirm_format=<disk>`), `/data` fstab mount, `/data` tree, `/opt/media-stack` | `vm-media-stack.sh bootstrap` |
 | `playbooks/secrets-init.yml` | `localhost` | | Creates 1Password item `media-stack` / adds missing fields only; never overwrites | `stack/secrets-init.sh` |
 | `playbooks/media-stack.yml` | `media_vms` | | Syncs `stack/` to `/opt/media-stack/stack`, renders `<svc>/secrets.env` (0600) from 1Password, `docker compose up` (never `down`) | `stack/deploy.sh` |
-| `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing) | `stack/{sonarr,radarr,lidarr}/configure.sh` |
+| `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing); download client qBittorrent (`qbittorrent:8080`, user `admin`) with category Sonarr `tv`, Radarr `movies`, Lidarr `music` (adds, or fixes it when settings differ or its test fails) | `stack/{sonarr,radarr,lidarr}/configure.sh`, manual download-client setup |
 | `playbooks/qbt-prowlarr-config.yml` | `localhost` → app APIs | | qBittorrent password, prefs/save path, categories `movies tv anime music`; Prowlarr apps (Sonarr, Radarr, Lidarr) + qBittorrent download client | `stack/{qbittorrent,prowlarr}/configure.sh` |
 
 Usage pattern, every playbook:
@@ -103,8 +103,8 @@ op run --env-file .env.op -- terraform apply
 | 9 | VM host: docker, `/data` (new blank data disk: confirm the format) | `ansible-playbook playbooks/media-host.yml -e confirm_format=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1` |
 | 10 | App secrets in 1Password | `ansible-playbook playbooks/secrets-init.yml` |
 | 11 | Deploy the stack | `ansible-playbook playbooks/media-stack.yml` |
-| 12 | *arr root folders | `ansible-playbook playbooks/arr-config.yml` |
-| 13 | qBittorrent + Prowlarr app sync | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 12 | qBittorrent + Prowlarr app sync | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 13 | *arr root folders + qBittorrent download client (needs the qBittorrent password from step 12) | `ansible-playbook playbooks/arr-config.yml` |
 
 Then the manual steps in [docs/media-stack.md](../docs/media-stack.md) section 4 (Jellyfin wizard,
 indexers). On the existing cluster steps 1-13 are converge runs: each must report `changed=0`,

@@ -1,0 +1,228 @@
+---
+# qBittorrent download client of one *arr app (arr_config_app.download_client). Included from
+# app.yml inside the per-app block: arr_config_api and arr_config_api_key are set there, and a
+# failure here is rescued there like the root-folder tasks.
+# The entry is matched by name (arr_config_download_client.name, case-insensitive like the apps'
+# own uniqueness check); other clients (e.g. a tagged anime client) are left alone.
+#   missing  -> POST built from the QBittorrent schema: host, port, useSsl=false, username, password,
+#               <category_field>=<category>, name, enable, priority; every other field at its default.
+#   present  -> compare host, port, useSsl, username, <category_field> and enable. The password comes
+#               back masked ("********"), so an entry that otherwise matches is checked with
+#               POST downloadclient/test (the app tests with its stored password). A PUT with the real
+#               password happens only when a field differs or the test fails validation (400:
+#               wrong password, or qBittorrent unreachable; then the PUT fails too and the app is
+#               reported as failed). Any other test status is an error, not a change.
+# changed only when a POST/PUT happens (in check mode: when one would happen).
+- name: "Check the qBittorrent password was read | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that: arr_config_api_keys.qbittorrent_password | default('') | length > 0
+    fail_msg: >-
+      {{ arr_config_app.app }}: could not read field qbittorrent_password of 1Password item
+      {{ arr_config_op_item }} (vault {{ op_vault }}). Download client not configured.
+    quiet: true
+
+- name: "GET download clients | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_api }}/downloadclient"
+    headers:
+      X-Api-Key: "{{ arr_config_api_key }}"
+    timeout: "{{ arr_config_timeout }}"
+  register: arr_config_dcs
+  until: arr_config_dcs.status == 200
+  retries: 3
+  delay: 5
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: "Check GET download clients succeeded | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that: arr_config_dcs.status == 200
+    fail_msg: >-
+      {{ arr_config_app.app }}: GET {{ arr_config_api }}/downloadclient -> {{ arr_config_dcs.status }}
+      {{ arr_config_dcs.msg | default('') }}
+    quiet: true
+
+# arr_config_dc_want: the managed non-secret fields; arr_config_dc_diff: the managed settings that
+# differ from the existing entry (all of them when there is none).
+- name: "Compare the download client with the wanted one | {{ arr_config_app.app }}"
+  ansible.builtin.set_fact:
+    arr_config_dc_current: >-
+      {{ arr_config_dcs.json | selectattr('name', 'match', '(?i)^' ~ (arr_config_download_client.name | regex_escape) ~ '$') | first | default(none) }}
+    arr_config_dc_want: >-
+      {{ {'host': arr_config_download_client.host,
+          'port': arr_config_download_client.port | int,
+          'useSsl': false,
+          'username': arr_config_download_client.username,
+          arr_config_app.download_client.category_field: arr_config_app.download_client.category} }}
+
+# A managed field the existing entry does not have (e.g. a wrong category_field) would differ on
+# every run; fail instead of PUTting forever.
+- name: "Check the existing entry has the managed fields | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that: arr_config_dc_want.keys() | list | difference(arr_config_dc_current.fields | map(attribute='name')) | length == 0
+    fail_msg: >-
+      {{ arr_config_app.app }}: download client {{ arr_config_dc_current.name }} has no field(s)
+      {{ arr_config_dc_want.keys() | list | difference(arr_config_dc_current.fields | map(attribute='name')) }}
+      (implementation {{ arr_config_dc_current.implementation }}); check download_client.category_field.
+    quiet: true
+  when: arr_config_dc_current is not none
+
+- name: "Find the differing settings | {{ arr_config_app.app }}"
+  ansible.builtin.set_fact:
+    arr_config_dc_diff: >-
+      {{ (arr_config_dc_want | dict2items | difference(arr_config_dc_have | dict2items) | map(attribute='key') | list)
+         + ([] if arr_config_dc_current.enable | default(false) else ['enable']) }}
+  vars:
+    arr_config_dc_have: >-
+      {{ arr_config_dc_current.fields | default([]) | selectattr('value', 'defined')
+         | items2dict(key_name='name', value_name='value') }}
+
+- name: "Test the existing download client (stored password) | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_api }}/downloadclient/test"
+    method: POST
+    headers:
+      X-Api-Key: "{{ arr_config_api_key }}"
+    body_format: json
+    body: "{{ arr_config_dc_current }}"
+    status_code: [200, 204]   # Radarr answers 204 No Content on success
+    return_content: true
+    timeout: 60
+  register: arr_config_dc_test
+  failed_when: false
+  # Runs in check mode too: it changes no app setting (qBittorrent creates the category if missing).
+  check_mode: false
+  no_log: true
+  when: arr_config_dc_current is not none and arr_config_dc_diff | length == 0
+
+- name: "Check the connection test could run | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that: arr_config_dc_test.status | default(-1) in [200, 204, 400]
+    fail_msg: >-
+      {{ arr_config_app.app }}: POST {{ arr_config_api }}/downloadclient/test -> {{ arr_config_dc_test.status | default(-1) }}
+      {{ arr_config_dc_test.msg | default('') }}
+    quiet: true
+  when: arr_config_dc_test is not skipped
+
+- name: "Decide whether the download client needs a change | {{ arr_config_app.app }}"
+  ansible.builtin.set_fact:
+    arr_config_dc_action: >-
+      {{ 'add' if arr_config_dc_current is none
+         else 'none' if (arr_config_dc_diff | length == 0 and arr_config_dc_test.status | default(-1) in [200, 204])
+         else 'update' }}
+
+- name: "Report download client | {{ arr_config_app.app }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ arr_config_app.app }}: download client {{ arr_config_download_client.name }}
+      {{ 'missing' if arr_config_dc_current is none
+         else 'differs in ' ~ (arr_config_dc_diff | join(', ')) if arr_config_dc_diff | length > 0
+         else 'matches, test ' ~ ('passed' if arr_config_dc_test.status | default(-1) in [200, 204]
+                                  else 'failed (' ~ arr_config_dc_test.status | default(-1) ~ ' '
+                                       ~ (arr_config_dc_test.json | default(arr_config_dc_test.msg | default('')))
+                                       ~ '), password will be reset') }}
+
+- name: "Would add/update the download client (check mode) | {{ arr_config_app.app }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ arr_config_app.app }}: would {{ 'POST' if arr_config_dc_action == 'add' else 'PUT' }}
+      {{ arr_config_download_client.name }} ({{ arr_config_download_client.host }}:{{ arr_config_download_client.port }},
+      {{ arr_config_app.download_client.category_field }}={{ arr_config_app.download_client.category }})
+  changed_when: true
+  when: ansible_check_mode and arr_config_dc_action != 'none'
+
+- name: "GET download client schema | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_api }}/downloadclient/schema"
+    headers:
+      X-Api-Key: "{{ arr_config_api_key }}"
+    timeout: "{{ arr_config_timeout }}"
+  register: arr_config_dc_schema
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when: arr_config_dc_action == 'add'
+
+# Also verifies the category field name of this app against its live schema (check mode included).
+- name: "Check the QBittorrent schema has the managed fields | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that:
+      - arr_config_dc_schema.status == 200
+      - arr_config_dc_schema_fields is not none
+      - arr_config_dc_want.keys() | list | difference(arr_config_dc_schema_fields.fields | map(attribute='name')) | length == 0
+      - "'password' in arr_config_dc_schema_fields.fields | map(attribute='name')"
+    fail_msg: >-
+      {{ arr_config_app.app }}: GET {{ arr_config_api }}/downloadclient/schema -> {{ arr_config_dc_schema.status }}
+      {{ arr_config_dc_schema.msg | default('') }}; QBittorrent fields:
+      {{ arr_config_dc_schema_fields.fields | default([]) | map(attribute='name') | list }}
+      (wanted {{ arr_config_dc_want.keys() | list + ['password'] }})
+    quiet: true
+  vars:
+    arr_config_dc_schema_fields: >-
+      {{ arr_config_dc_schema.json | default([]) | selectattr('implementation', 'eq', 'QBittorrent') | first | default(none) }}
+  when: arr_config_dc_action == 'add'
+
+- name: "POST download client | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_api }}/downloadclient"
+    method: POST
+    headers:
+      X-Api-Key: "{{ arr_config_api_key }}"
+    body_format: json
+    body: >-
+      {{ arr_config_dc_schema_entry | dict2items | rejectattr('key', 'eq', 'id') | items2dict
+         | combine({'name': arr_config_download_client.name, 'enable': true, 'priority': 1,
+                    'fields': arr_config_dc_schema_entry.fields
+                              | rejectattr('name', 'in', arr_config_dc_set.keys() | list) | list
+                              + (arr_config_dc_set | dict2items(key_name='name', value_name='value'))}) }}
+    status_code: [200, 201]
+    return_content: true
+    timeout: 60
+  vars:
+    arr_config_dc_schema_entry: >-
+      {{ arr_config_dc_schema.json | selectattr('implementation', 'eq', 'QBittorrent') | first }}
+    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys.qbittorrent_password}) }}"
+  register: arr_config_dc_post
+  changed_when: arr_config_dc_post.status | default(-1) in [200, 201]
+  failed_when: false
+  no_log: true
+  when: not ansible_check_mode and arr_config_dc_action == 'add'
+
+- name: "PUT download client | {{ arr_config_app.app }}"
+  ansible.builtin.uri:
+    url: "{{ arr_config_api }}/downloadclient/{{ arr_config_dc_current.id }}"
+    method: PUT
+    headers:
+      X-Api-Key: "{{ arr_config_api_key }}"
+    body_format: json
+    body: >-
+      {{ arr_config_dc_current
+         | combine({'enable': true,
+                    'fields': arr_config_dc_current.fields
+                              | rejectattr('name', 'in', arr_config_dc_set.keys() | list) | list
+                              + (arr_config_dc_set | dict2items(key_name='name', value_name='value'))}) }}
+    status_code: [200, 202]
+    return_content: true
+    timeout: 60
+  vars:
+    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys.qbittorrent_password}) }}"
+  register: arr_config_dc_put
+  changed_when: arr_config_dc_put.status | default(-1) in [200, 202]
+  failed_when: false
+  no_log: true
+  when: not ansible_check_mode and arr_config_dc_action == 'update'
+
+- name: "Check POST/PUT download client succeeded | {{ arr_config_app.app }}"
+  ansible.builtin.assert:
+    that: arr_config_dc_write.status | default(-1) in [200, 201, 202]
+    fail_msg: >-
+      {{ arr_config_app.app }}: {{ 'POST' if arr_config_dc_action == 'add' else 'PUT' }}
+      {{ arr_config_api }}/downloadclient -> {{ arr_config_dc_write.status | default(-1) }}
+      {{ arr_config_dc_write.json | default(arr_config_dc_write.msg | default('')) }}. A 400 usually means
+      the app cannot reach qBittorrent at {{ arr_config_download_client.host }}:{{ arr_config_download_client.port }}
+      or the password was rejected.
+    quiet: true
+  vars:
+    arr_config_dc_write: "{{ arr_config_dc_post if arr_config_dc_action == 'add' else arr_config_dc_put }}"
+  when: not ansible_check_mode and arr_config_dc_action != 'none'

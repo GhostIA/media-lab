@@ -1,6 +1,6 @@
 ---
-# One *arr app (arr_config_app): wait for /ping, GET root folders, POST only the missing ones.
-# GETs run in check mode too (check_mode: false) so --check reports what would be added.
+# One *arr app (arr_config_app): wait for /ping, GET root folders, POST only the missing ones, then
+# the qBittorrent download client (download_client.yml). GETs run in check mode too (check_mode: false) so --check reports what would be added.
 # Every task carrying the API key has no_log; its failures are reported by the asserts that
 # follow it (status + message, never the key). A failure is rescued and recorded in
 # arr_config_failed so the remaining apps still run; main.yml fails at the end.
@@ -20,10 +20,10 @@
     arr_config_skipped: >-
       {{ arr_config_skipped + [arr_config_app.app ~ ': ' ~ arr_config_app.url ~ '/ping did not answer 200 after '
          ~ arr_config_ping_retries ~ ' tries (last status ' ~ arr_config_ping.status ~ ' '
-         ~ (arr_config_ping.msg | default('')) ~ '). Root folders not checked.'] }}
+         ~ (arr_config_ping.msg | default('')) ~ '). Root folders / download client not checked.'] }}
   when: arr_config_ping.status != 200
 
-- name: "Root folders | {{ arr_config_app.app }}"
+- name: "Root folders and download client | {{ arr_config_app.app }}"
   when: arr_config_ping.status == 200
   vars:
     arr_config_api: "{{ arr_config_app.url }}/api/{{ arr_config_app.api_version }}"
@@ -182,6 +182,10 @@
         label: "{{ item.path }}"
       changed_when: true
       when: ansible_check_mode
+
+    - name: "Download client | {{ arr_config_app.app }}"
+      ansible.builtin.include_tasks: download_client.yml
+      when: arr_config_app.download_client is defined
 
   rescue:
     - name: "Record failure and go on with the next app | {{ arr_config_app.app }}"

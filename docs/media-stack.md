@@ -23,6 +23,7 @@ VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.
      ├─ radarr       :7878   movies                   /data
      ├─ lidarr       :8686   music                    /data
      ├─ prowlarr     :9696   indexers -> app sync to sonarr/radarr/lidarr
+     ├─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr
      └─ qbittorrent  :8080   downloads into           /data/torrents/<category>
  │
  ├─ OS disk   32G  (ext4 /)                ─┐
@@ -70,12 +71,13 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 | Radarr | http://192.168.8.200:7878 | `curl -fsS http://192.168.8.200:7878/ping` | `{"status":"OK"}` |
 | Lidarr | http://192.168.8.200:8686 | `curl -fsS http://192.168.8.200:8686/ping` | `{"status":"OK"}` |
 | Prowlarr | http://192.168.8.200:9696 | `curl -fsS http://192.168.8.200:9696/ping` | `{"status":"OK"}` |
+| Seerr | http://192.168.8.200:5055 | `curl -fsS http://192.168.8.200:5055/api/v1/status` | JSON with `"version"` |
 | qBittorrent | http://192.168.8.200:8080 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8080/` | `200` |
 
 All at once:
 
 ```sh
-for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 8080/; do
+for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status 8080/; do
   printf '%-12s ' "$p"; curl -fsS -m 5 -o /dev/null -w '%{http_code}\n' "http://192.168.8.200:$p" || echo FAIL
 done
 ```

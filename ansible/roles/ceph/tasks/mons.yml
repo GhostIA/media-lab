@@ -1,0 +1,49 @@
+---
+# Only hosts in ceph_mons get a monitor and a manager; they are created one host at a time.
+- name: Read the monitor map
+  ansible.builtin.command:
+    argv: [ceph, mon, dump, -f, json]
+  register: ceph_mon_dump
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"
+
+- name: Read the manager map
+  ansible.builtin.command:
+    argv: [ceph, mgr, dump, -f, json]
+  register: ceph_mgr_dump
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"
+
+- name: Work out existing monitors and managers
+  ansible.builtin.set_fact:
+    ceph_existing_mons: >-
+      {{ (ceph_mon_dump.stdout | from_json).mons | map(attribute='name') | list
+         if ceph_mon_dump.rc == 0 else [] }}
+    ceph_existing_mgrs: >-
+      {{ ([(ceph_mgr_dump.stdout | from_json).active_name]
+          + (ceph_mgr_dump.stdout | from_json).standbys | map(attribute='name') | list)
+         if ceph_mgr_dump.rc == 0 else [] }}
+
+- name: Create monitor
+  ansible.builtin.command:
+    argv: [pveceph, mon, create]
+  changed_when: true
+  throttle: 1
+  when:
+    - inventory_hostname in groups['ceph_mons']
+    - inventory_hostname not in ceph_existing_mons
+
+- name: Create manager
+  ansible.builtin.command:
+    argv: [pveceph, mgr, create]
+  changed_when: true
+  throttle: 1
+  when:
+    - inventory_hostname in groups['ceph_mons']
+    - inventory_hostname not in ceph_existing_mgrs

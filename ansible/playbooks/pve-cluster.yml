@@ -1,0 +1,17 @@
+---
+# Join standalone Proxmox VE nodes to the "media" cluster (replaces pve-tools/join.sh).
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/pve-cluster.yml --check --diff
+#   ansible-playbook playbooks/pve-cluster.yml [--limit <new-node>] [-e pve_cluster_join_node=<member>]
+#
+# Nodes that already have /etc/pve/corosync.conf are skipped, so on the live cluster this is a no-op.
+# A joining node must have no guests. root@pam passwords come from 1Password (needs `op` signed in);
+# they are only sent to the joining node's API and never logged.
+# Nodes join one at a time (serial: 1) because corosync membership changes must not overlap.
+- name: Join nodes to the Proxmox VE cluster
+  hosts: pve_nodes
+  serial: 1
+  gather_facts: false
+  roles:
+    - role: pve_cluster

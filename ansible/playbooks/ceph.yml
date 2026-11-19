@@ -1,0 +1,22 @@
+---
+# Ceph on the "media" cluster (replaces pve-tools/ceph-setup.sh). Phases are tags; each is a no-op once done.
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/ceph.yml                    # install,init,mons,pool,status
+#   ansible-playbook playbooks/ceph.yml --tags status      # ceph -s, osd tree, df (read-only)
+#   ansible-playbook playbooks/ceph.yml --tags install|init|mons|pool
+#   ansible-playbook playbooks/ceph.yml --tags osds -e confirm_destroy=<serial> --check   # dry run first!
+#
+# Tags:
+#   install  pveceph install (no-subscription, {{ ceph_release }}) on every node without that release
+#   init     pveceph init --network/--cluster-network {{ lan_cidr }} unless /etc/pve/ceph.conf exists
+#   mons     pveceph mon/mgr create on ceph_mons hosts that are not in the mon/mgr map
+#   pool     EC k=2,m=1 (failure domain host) RBD pool + PVE storage {{ ceph_pool }} unless <pool>-data exists
+#   status   ceph -s, ceph osd tree, ceph df
+#   osds     DESTRUCTIVE, never runs by default: zaps the disk whose serial is confirm_destroy (must be one of
+#            the host's ceph_osd_serials) and creates an OSD; refuses if the disk is mounted or already an OSD.
+- name: Ceph
+  hosts: pve_nodes
+  gather_facts: false
+  roles:
+    - role: ceph

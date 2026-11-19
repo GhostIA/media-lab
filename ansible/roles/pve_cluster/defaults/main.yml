@@ -1,0 +1,16 @@
+---
+# Existing cluster member a new node joins through (its API address and TLS fingerprint are used).
+pve_cluster_join_node: "{{ pve_api_node }}"
+
+# 1Password item ids (vault {{ op_vault }}) holding each node's root@pam password.
+# These are ids, not secrets; the passwords are only read at runtime via the onepassword lookup.
+pve_cluster_op_items:
+  intel-1ecbc8: 33v7cdvlzo66olggj7a6kqrzpu
+  intel-a163f8: 222r6wnw7ulxzulw5frmmn6gky
+  intel-177e78: qfq6hbnnr4ywjhjh4c3qpete5u
+  intel-91c45d: asqchyk3yciskkqtn2y557g37u
+  intel-d1babf: yexxnovydg5lge77s3y4x2ziua
+
+# How long to wait for a joined node to show up in `pvecm nodes` (retries x delay seconds).
+pve_cluster_join_retries: 24
+pve_cluster_join_delay: 5

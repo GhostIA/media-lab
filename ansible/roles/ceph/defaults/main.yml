@@ -1,0 +1,15 @@
+---
+# Node that runs cluster-wide commands (init, pool, status).
+ceph_admin_node: "{{ pve_api_node }}"
+ceph_repository: no-subscription
+ceph_version: "{{ ceph_release }}"
+ceph_public_network: "{{ lan_cidr }}"
+ceph_cluster_network: "{{ lan_cidr }}"
+
+# Erasure-coded RBD pool: PVE creates <pool>-data (EC) + <pool>-metadata (replicated) and storage <pool>.
+ceph_pool_ec_k: 2
+ceph_pool_ec_m: 1
+ceph_pool_failure_domain: host
+ceph_pool_autoscale_mode: "on"
+
+# osds phase: pass -e confirm_destroy=<serial> (one of a host's ceph_osd_serials); no default on purpose.

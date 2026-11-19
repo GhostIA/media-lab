@@ -1,0 +1,29 @@
+---
+# Erasure-coded k=2,m=1 (RAID-5-like), failure domain host. PVE creates <pool>-data (EC),
+# <pool>-metadata (replicated, required by RBD) and one storage entry named <pool>.
+- name: List pools
+  ansible.builtin.command:
+    argv: [ceph, osd, pool, ls, -f, json]
+  register: ceph_pools
+  changed_when: false
+  check_mode: false
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"
+
+- name: Create the erasure-coded pool and storage
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - pool
+      - create
+      - "{{ ceph_pool }}"
+      - --erasure-coding
+      - "k={{ ceph_pool_ec_k }},m={{ ceph_pool_ec_m }},failure-domain={{ ceph_pool_failure_domain }}"
+      - --pg_autoscale_mode
+      - "{{ ceph_pool_autoscale_mode }}"
+      - --add_storages
+      - "1"
+  changed_when: true
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"
+  when: (ceph_pool ~ '-data') not in (ceph_pools.stdout | from_json)

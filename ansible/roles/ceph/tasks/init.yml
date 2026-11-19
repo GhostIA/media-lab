@@ -1,0 +1,7 @@
+---
+- name: Write ceph.conf (public and cluster network)
+  ansible.builtin.command:
+    argv: [pveceph, init, --network, "{{ ceph_public_network }}", --cluster-network, "{{ ceph_cluster_network }}"]
+    creates: /etc/pve/ceph.conf
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"

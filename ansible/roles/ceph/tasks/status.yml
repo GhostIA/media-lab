@@ -1,0 +1,20 @@
+---
+- name: Collect ceph -s, osd tree and df
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [ceph, -s]
+    - [ceph, osd, tree]
+    - [ceph, df]
+  loop_control:
+    label: "{{ item | join(' ') }}"
+  register: ceph_status
+  changed_when: false
+  check_mode: false
+  run_once: true
+  delegate_to: "{{ ceph_admin_node }}"
+
+- name: Show Ceph status
+  ansible.builtin.debug:
+    msg: "{{ ceph_status.results | map(attribute='stdout_lines') | list }}"
+  run_once: true

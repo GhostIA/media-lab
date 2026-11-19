@@ -57,7 +57,7 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 | `playbooks/ceph.yml` | `pve_nodes` / `ceph_mons` / `ceph_osds` | `install`, `init`, `mons`, `pool`, `status` (all run by default); `osds` (tagged `never`) | Ceph packages, `ceph.conf`, MON/MGR, EC 2+1 pool + PVE storage `media-ec`; `status` is read-only. `osds` zaps and creates OSDs: **destructive**, needs `--tags osds -e confirm_destroy=<serial>` | `ceph-setup.sh` |
 | `playbooks/pve-terraform-token.yml` | `pve_api_node` (192.168.8.234) | | API user/token `terraform@pve!media` with a scoped role; token secret stored in 1Password item `pve-terraform` | (new) |
 | `terraform/` (not a playbook) | PVE API | | Debian 13 cloud image + VM 200 (`bpg/proxmox` 0.123.1), `prevent_destroy` | `vm-media-stack.sh image` / `create` / `start` |
-| `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, data disk (formatted **only if blank**), `/data` fstab mount, `/data` tree, `/opt/media-stack` | `vm-media-stack.sh bootstrap` |
+| `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, data disk (formatted **only if blank and confirmed** with `-e confirm_format=<disk>`), `/data` fstab mount, `/data` tree, `/opt/media-stack` | `vm-media-stack.sh bootstrap` |
 | `playbooks/secrets-init.yml` | `localhost` | | Creates 1Password item `media-stack` / adds missing fields only; never overwrites | `stack/secrets-init.sh` |
 | `playbooks/media-stack.yml` | `media_vms` | | Syncs `stack/` to `/opt/media-stack/stack`, renders `<svc>/secrets.env` (0600) from 1Password, `docker compose up` (never `down`) | `stack/deploy.sh` |
 | `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing) | `stack/{sonarr,radarr,lidarr}/configure.sh` |
@@ -100,7 +100,7 @@ op run --env-file .env.op -- terraform apply
 | 6 | EC pool + storage, check health | `ansible-playbook playbooks/ceph.yml --tags pool,status` |
 | 7 | Terraform API token | `ansible-playbook playbooks/pve-terraform-token.yml` |
 | 8 | VM 200 | `cd terraform && op run --env-file .env.op -- terraform apply` |
-| 9 | VM host: docker, `/data` | `ansible-playbook playbooks/media-host.yml` |
+| 9 | VM host: docker, `/data` (new blank data disk: confirm the format) | `ansible-playbook playbooks/media-host.yml -e confirm_format=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1` |
 | 10 | App secrets in 1Password | `ansible-playbook playbooks/secrets-init.yml` |
 | 11 | Deploy the stack | `ansible-playbook playbooks/media-stack.yml` |
 | 12 | *arr root folders | `ansible-playbook playbooks/arr-config.yml` |
@@ -116,8 +116,10 @@ and `terraform plan` must show no changes.
   any change on a working setup is a bug in the role, not in the host. Always `--check --diff` first.
 - `ceph.yml --tags osds` is the only path that touches OSD disks. It is tagged `never` and refuses
   without `-e confirm_destroy=<exact serial>`. Never run it against an existing OSD.
-- `media-host.yml` formats the VM's data disk **only when `blkid` finds no filesystem**. It never
-  reformats `/data`.
+- `media-host.yml` formats the VM's data disk **only when `blkid` finds no signature at all and
+  you pass `-e confirm_format=<disk>`** (the by-id path
+  `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1` or the `/dev/sdX` it resolves to). A blank
+  disk without it stops the play before anything is written. It never reformats `/data`.
 - `media-stack.yml` never runs `docker compose down`; a removed service must be taken down by hand.
 - Nothing here touches node boot disks or corosync config; `pve-cluster.yml` skips nodes that are
   already clustered.

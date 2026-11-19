@@ -13,6 +13,10 @@ media_host_categories: "{{ media_categories | default(['movies', 'tv', 'anime', 
 # cannot be confused with the OS disk (drive-scsi0) the way /dev/sdX can.
 media_host_data_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 media_host_data_label: data
+# Formatting a blank data disk needs explicit confirmation: pass `-e confirm_format=<disk>`, where
+# <disk> is media_host_data_disk (the by-id path) or the device it resolves to (e.g. /dev/sdb).
+# Without it a blank disk stops the play before anything is written.
+media_host_confirm_format: "{{ confirm_format | default('') }}"
 media_host_data_mount_opts: defaults,noatime,nofail,x-systemd.device-timeout=30s
 
 media_host_docker_repo_url: https://download.docker.com/linux/debian

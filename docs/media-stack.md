@@ -98,7 +98,7 @@ Terraform, `op whoami`), the cluster is up (`ansible-playbook playbooks/ceph.yml
 | # | Step | Command |
 |---|---|---|
 | 1 | Download the Debian 13 cloud image, create VM 200 (disks on `media-ec`, cloud-init user/IP/key), boot it | `cd terraform && terraform init && op run --env-file .env.op -- terraform apply` |
-| 2 | Install Docker + rsync, format (only if blank) and mount `/data`, create the `/data` tree and `/opt/media-stack` | `ansible-playbook playbooks/media-host.yml` |
+| 2 | Install Docker + rsync, format (only if blank, with explicit confirmation) and mount `/data`, create the `/data` tree and `/opt/media-stack` | `ansible-playbook playbooks/media-host.yml -e confirm_format=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1` (the flag is only needed for a new, blank data disk) |
 | 3 | Check VM and `/data` | `ansible intel-a163f8 -a 'qm status 200'`, `ssh media@192.168.8.200 'df -h /data; ls /data/*'` |
 | 4 | Create the 1Password item `media-stack` with generated API keys / password (only missing fields) | `ansible-playbook playbooks/secrets-init.yml` |
 | 5 | Sync `stack/`, render `secrets.env`, `docker compose up` | `ansible-playbook playbooks/media-stack.yml` |

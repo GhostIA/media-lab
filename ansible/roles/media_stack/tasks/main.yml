@@ -38,8 +38,9 @@
 
 # Docker would create a missing bind-mount source as root:root, which apps running as a fixed
 # non-root uid (e.g. Seerr, uid 1000) can't write to. Create each service's config dir owned by
-# PUID:PGID up front. No mode: existing dirs keep theirs (linuxserver images manage their own).
-- name: Ensure each service's config directory exists, owned by PUID:PGID
+# PUID:PGID up front. No mode on purpose: the live dirs differ (2775/2755, linuxserver images
+# manage their own), and a fixed mode would change them on every host; new dirs get the umask default.
+- name: Ensure each service's config directory exists, owned by PUID:PGID  # noqa: risky-file-permissions
   ansible.builtin.file:
     path: "{{ media_stack_config_root }}/{{ item | dirname }}"
     state: directory

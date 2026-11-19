@@ -12,6 +12,7 @@ losing data), and one VM on top runs the media apps in Docker:
 | **Lidarr** | Same for music | <http://192.168.8.200:8686> |
 | **Prowlarr** | Manages indexers for all three of the above | <http://192.168.8.200:9696> |
 | **Seerr** | Request page: users sign in with Jellyfin and ask for movies/shows; Radarr/Sonarr fetch them | <http://192.168.8.200:5055> |
+| **Cleanuparr** | Cleans the download queue: stalled, failed-import, malware and finished/orphaned downloads | <http://192.168.8.200:11011> |
 | **qBittorrent** | Download client | <http://192.168.8.200:8080> |
 
 Everything is built and kept in shape with **Ansible** (`ansible/`) and **Terraform** (`terraform/`, the VM
@@ -50,7 +51,7 @@ ansible-playbook playbooks/ceph.yml --tags status         # Ceph should say HEAL
 And the apps, from anywhere on the LAN:
 
 ```sh
-for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status; do
+for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status 11011/health; do
   printf '%-12s ' $p; curl -fsS -m 5 http://192.168.8.200:$p; echo; done
 curl -s -o /dev/null -w 'qbittorrent  %{http_code}\n' http://192.168.8.200:8080/   # 200
 ```
@@ -66,6 +67,9 @@ curl -s -o /dev/null -w 'qbittorrent  %{http_code}\n' http://192.168.8.200:8080/
   Anime `/data/media/anime` (type: Shows), Music `/data/media/music`.
 - **Prowlarr:** add your indexers by hand. Prowlarr then pushes them to Sonarr, Radarr and Lidarr
   automatically.
+- **Cleanuparr:** create its login on first visit, then add qBittorrent and the *arrs and pick
+  which cleanups to enable. Steps and safe starting values are in
+  [`stack/cleanuparr/README.md`](stack/cleanuparr/README.md).
 - **Seerr:** after Jellyfin is set up, run Seerr's 4-step wizard once (sign in with Jellyfin, then
   connect Radarr and Sonarr). The exact values are in [`stack/seerr/README.md`](stack/seerr/README.md).
 

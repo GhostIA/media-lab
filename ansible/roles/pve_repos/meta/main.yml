@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: Proxmox VE 9 no-subscription apt repos (PVE + Ceph), enterprise repos disabled
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

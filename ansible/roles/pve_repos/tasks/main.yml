@@ -1,0 +1,35 @@
+---
+# Written with copy (not deb822_repository): that module adds X-Repolib-Name and reorders the
+# fields, which would rewrite the live files that fix-repos.sh created. This content is byte-identical.
+- name: Write no-subscription deb822 sources
+  ansible.builtin.copy:
+    dest: "/etc/apt/sources.list.d/{{ item.name }}.sources"
+    content: |
+      Types: deb
+      URIs: {{ item.uris }}
+      Suites: {{ pve_repos_suite }}
+      Components: {{ item.components }}
+      Signed-By: {{ pve_repos_signed_by }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ pve_repos_sources }}"
+  loop_control:
+    label: "{{ item.name }}.sources"
+  notify: Update apt cache
+
+- name: Find enterprise repo files
+  ansible.builtin.stat:
+    path: "/etc/apt/sources.list.d/{{ item }}"
+  loop: "{{ pve_repos_disabled_files }}"
+  register: pve_repos_disabled_stat
+
+- name: Disable enterprise repos
+  ansible.builtin.lineinfile:
+    path: "/etc/apt/sources.list.d/{{ item.item }}"
+    regexp: "^Enabled:"
+    line: "Enabled: no"
+  loop: "{{ pve_repos_disabled_stat.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  notify: Update apt cache

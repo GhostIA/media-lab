@@ -3,8 +3,8 @@
 # usage: deploy.sh [svc...]     sync, resolve secrets, `docker compose up -d [svc...]`, then `ps`
 #        deploy.sh config       validate the merged Compose files locally (`docker compose config -q`)
 #
-#   1. rsync stack/ -> $REMOTE_DIR on the VM (never .env or */secrets.env; no --delete, so a
-#      removed service must be taken down and its directory deleted by hand)
+#   1. rsync stack/ -> $REMOTE_DIR on the VM (tar over ssh if the VM has no rsync); never .env or
+#      */secrets.env; no --delete, so a removed service must be taken down and deleted by hand
 #   2. on the VM, copy .env.example to .env only if .env is absent
 #   3. for each <svc>/secrets.env.tpl: `op inject` locally and stream the result over ssh into
 #      $REMOTE_DIR/<svc>/secrets.env (umask 077); resolved secrets never touch the Mac's disk
@@ -66,9 +66,18 @@ done
 
 echo "== sync to $MEDIA_HOST:$REMOTE_DIR"
 $SSH "$MEDIA_HOST" "mkdir -p $REMOTE_DIR" || fail "ssh $MEDIA_HOST / mkdir $REMOTE_DIR"
-rsync -rlptz --exclude=.env --exclude='*/secrets.env' -e "$SSH" ./ "$MEDIA_HOST:$REMOTE_DIR/" \
-  || fail "rsync to $MEDIA_HOST:$REMOTE_DIR"
-ok "synced stack/"
+if $SSH "$MEDIA_HOST" "command -v rsync" >/dev/null 2>&1; then
+  rsync -rlptz --exclude=.env --exclude='*/secrets.env' -e "$SSH" ./ "$MEDIA_HOST:$REMOTE_DIR/" \
+    || fail "rsync to $MEDIA_HOST:$REMOTE_DIR"
+  ok "synced stack/ (rsync)"
+else
+  # no rsync on the VM: same file set over tar (no AppleDouble/xattr noise from macOS tar)
+  find . -type f ! -name .env ! -path './*/secrets.env' \
+    | COPYFILE_DISABLE=1 tar -cf - --no-xattrs -T - \
+    | $SSH "$MEDIA_HOST" "tar -xmf - --no-same-owner -C $REMOTE_DIR" \
+    || fail "tar copy to $MEDIA_HOST:$REMOTE_DIR"
+  ok "synced stack/ (tar; rsync missing on VM)"
+fi
 
 echo "== shared .env"
 $SSH "$MEDIA_HOST" "cd $REMOTE_DIR && if [ -f .env ]; then echo 'OK   .env exists, kept'; else cp .env.example .env && echo 'OK   .env created from .env.example'; fi" \

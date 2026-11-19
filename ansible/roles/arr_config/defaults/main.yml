@@ -1,0 +1,51 @@
+---
+# One entry per *arr app. The role GETs <url>/api/<api_version>/rootfolder and POSTs only the
+# folders whose path is missing (trailing "/" ignored).
+#   app          name; the API key is the 1Password field "<app>_api_key" of item
+#                arr_config_op_item in vault op_vault (same key the container gets via secrets.env)
+#   url          base URL, no trailing slash
+#   api_version  v3 (Sonarr/Radarr) or v1 (Lidarr)
+#   folders      list of POST bodies; each needs "path", other keys are sent as-is (e.g. "name")
+#   extra.body      keys merged into every POST body of this app
+#   extra.profiles  {<body key>: {endpoint, name}}: the id of the profile called <name> from
+#                   GET /api/<v>/<endpoint>, else the lowest id; only looked up when a POST is needed
+arr_config_apps:
+  - app: sonarr
+    url: "http://{{ media_vm.ip }}:8989"
+    api_version: v3
+    folders:
+      - {path: /data/media/tv}
+      - {path: /data/media/anime}
+    extra: {}
+  - app: radarr
+    url: "http://{{ media_vm.ip }}:7878"
+    api_version: v3
+    folders:
+      - {path: /data/media/movies}
+    extra: {}
+  - app: lidarr
+    url: "http://{{ media_vm.ip }}:8686"
+    api_version: v1
+    folders:
+      - {path: /data/media/music, name: Music}
+    extra:
+      body:
+        defaultMonitorOption: all
+        defaultNewItemMonitorOption: all
+        defaultTags: []
+      profiles:
+        defaultQualityProfileId: {endpoint: qualityprofile, name: Any}
+        defaultMetadataProfileId: {endpoint: metadataprofile, name: Standard}
+
+# 1Password item holding the <app>_api_key fields (vault: op_vault from group_vars/all.yml).
+arr_config_op_item: media-stack
+
+# Wait for GET <url>/ping: retries x (delay + up to timeout) seconds, i.e. 60-150s. An app still
+# down after that is skipped with a message (the run then fails only if fail_on_unreachable is true).
+arr_config_ping_retries: 30
+arr_config_ping_delay: 2
+arr_config_ping_timeout: 3
+arr_config_fail_on_unreachable: false
+
+# HTTP timeout per API call, seconds.
+arr_config_timeout: 20

@@ -1,0 +1,23 @@
+---
+# *arr root folders through the apps' HTTP APIs (replaces stack/{sonarr,radarr,lidarr}/configure.sh).
+#   Sonarr  /api/v3/rootfolder  /data/media/tv, /data/media/anime
+#   Radarr  /api/v3/rootfolder  /data/media/movies
+#   Lidarr  /api/v1/rootfolder  /data/media/music ("Music", quality profile "Any", metadata "Standard")
+# Only missing folders are POSTed (changed only then); nothing is ever deleted or edited.
+# Runs on the control machine (localhost) against http://<media_vm.ip>:<port>: the API keys come
+# from 1Password in one item read (op CLI signed in, fields <app>_api_key of item media-stack; the
+# containers get the same keys via secrets.env) and never touch the VM.
+# An app whose /ping does not answer within 60-150s is skipped with a message (add
+# -e arr_config_fail_on_unreachable=true to fail instead). Any other error in one app is recorded,
+# the remaining apps still run, and the play fails at the end listing every error.
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/arr-config.yml --check --diff   # report what would be added
+#   ansible-playbook playbooks/arr-config.yml
+#   ansible-playbook playbooks/arr-config.yml -e '{"arr_config_apps": [...]}'   # other apps/folders
+- name: Configure *arr root folders
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: arr_config

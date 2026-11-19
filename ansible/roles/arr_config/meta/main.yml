@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: arr_config
+  author: GhostIA
+  description: Sonarr / Radarr / Lidarr root folders through their APIs (only adds what is missing)
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: GenericLinux
+      versions: [all]
+dependencies: []

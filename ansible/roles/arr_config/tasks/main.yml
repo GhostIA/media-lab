@@ -1,0 +1,42 @@
+---
+# One 1Password read per run: the whole item (onepassword_raw), keeping only the "<app>_api_key"
+# fields of the configured apps. `op` can time out transiently ("authorization timeout"), hence until.
+- name: Read the *arr API keys from 1Password (one item read)
+  ansible.builtin.set_fact:
+    arr_config_api_keys: >-
+      {{ (lookup('community.general.onepassword_raw', arr_config_op_item, vault=op_vault, errors='ignore')
+          | default({}, true)).fields | default([])
+         | selectattr('label', 'defined')
+         | selectattr('label', 'in', arr_config_apps | map(attribute='app') | map('regex_replace', '$', '_api_key'))
+         | items2dict(key_name='label', value_name='value') }}
+    arr_config_failed: []
+    arr_config_skipped: []
+  until: arr_config_api_keys | length > 0
+  retries: 3
+  delay: 3
+  failed_when: false   # a missing key is reported per app (without the secret) in app.yml
+  no_log: true
+
+- name: Configure root folders per app
+  ansible.builtin.include_tasks: app.yml
+  loop: "{{ arr_config_apps }}"
+  loop_control:
+    loop_var: arr_config_app
+    label: "{{ arr_config_app.app }}"
+
+- name: Forget the API keys
+  ansible.builtin.set_fact:
+    arr_config_api_keys: {}
+  no_log: true
+
+- name: Report apps skipped as unreachable
+  ansible.builtin.debug:
+    msg: "{{ ['SKIPPED (unreachable):'] + arr_config_skipped }}"
+  when: arr_config_skipped | length > 0
+
+- name: Fail on apps that could not be configured
+  ansible.builtin.fail:
+    msg: "{{ arr_config_failed + (arr_config_skipped if arr_config_fail_on_unreachable | bool else []) }}"
+  when: >-
+    arr_config_failed | length > 0
+    or (arr_config_fail_on_unreachable | bool and arr_config_skipped | length > 0)

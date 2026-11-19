@@ -1,0 +1,31 @@
+# Jellyfin media server (unit 3). Merged into the media-stack project by stack/deploy.sh:
+#   docker compose -f compose.yaml -f jellyfin/compose.yaml ... up -d jellyfin
+# Host paths come only from the shared .env (DATA_ROOT, CONFIG_ROOT); see stack/jellyfin/README.md.
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:12.4ubu2604-ls60
+    container_name: jellyfin
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      UMASK: ${UMASK:-002}
+      TZ: ${TZ:-America/Chicago}
+      # Transcode/image cache lives on the config disk, not on /data.
+      JELLYFIN_CACHE_DIR: /config/cache
+    ports:
+      - "8096:8096"      # web UI / API (own port, ready for a later OIDC proxy)
+      - "7359:7359/udp"  # local client auto-discovery
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/jellyfin:/config
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    # Hardware transcoding is a follow-up (see README), then add:
+    #   devices: ["/dev/dri:/dev/dri"]
+    #   group_add: ["<render gid on the VM>"]
+    healthcheck:
+      # /health answers 200 with "Degraded" while starting up, so require the body "Healthy"
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/health | grep -qx Healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

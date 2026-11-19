@@ -1,0 +1,161 @@
+---
+# Ship the local stack/ tree to {{ media_stack_root }} on the VM, render each <svc>/secrets.env from
+# its secrets.env.tpl (op:// references resolved on the controller with `op inject`, held in memory
+# only), then `docker compose up` with compose.yaml + every <svc>/compose.yaml.
+#
+# - .env and */secrets.env are never shipped from stack/; .env is created from .env.example only
+#   when absent, so edits made on the VM survive.
+# - Nothing on the VM is deleted: a removed service must be taken down and deleted by hand.
+# - Service files are merged with `-f` (not include:d), so relative paths in <svc>/compose.yaml
+#   resolve against the project dir (stack/): write `env_file: <svc>/secrets.env`.
+# - Compose is never stopped or taken down; only services whose config changed are recreated.
+
+- name: Collect the stack files to ship (never .env or secrets.env)
+  ansible.builtin.set_fact:
+    media_stack_tree: >-
+      {{ query('community.general.filetree', media_stack_src)
+         | rejectattr('path', 'search', '(^|/)(\.env|secrets\.env|\.DS_Store)$')
+         | list }}
+
+- name: Derive the Compose files and secrets templates
+  ansible.builtin.set_fact:
+    media_stack_compose_files: >-
+      {{ ['compose.yaml']
+         + (media_stack_tree | selectattr('state', 'eq', 'file') | map(attribute='path')
+            | select('match', '^[^/]+/compose\.yaml$') | sort) }}
+    media_stack_secret_services: >-
+      {{ media_stack_tree | selectattr('state', 'eq', 'file') | map(attribute='path')
+         | select('match', '^[^/]+/secrets\.env\.tpl$')
+         | map('regex_replace', '/secrets\.env\.tpl$', '') | sort }}
+
+- name: Ensure the stack root exists (setgid, group-writable like /opt/media-stack)
+  ansible.builtin.file:
+    path: "{{ media_stack_root }}"
+    state: directory
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+    mode: "02775"
+
+- name: Ensure the stack directories exist
+  ansible.builtin.file:
+    path: "{{ media_stack_root }}/{{ item.path }}"
+    state: directory
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+    mode: "02755"
+  loop: "{{ media_stack_tree | selectattr('state', 'eq', 'directory') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Copy the stack files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ media_stack_root }}/{{ item.path }}"
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ media_stack_tree | selectattr('state', 'eq', 'file') | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Create .env from .env.example if absent (an existing .env is kept)
+  ansible.builtin.copy:
+    src: "{{ media_stack_src }}/.env.example"
+    dest: "{{ media_stack_root }}/.env"
+    force: false
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+    mode: "0644"
+
+# All templates go through ONE `op inject` call (one 1Password authorization per run), joined
+# with a marker comment line and split again afterwards. Templates are read on the controller;
+# only the resolved result (in memory) is sent to the VM.
+- name: Resolve every secrets template with a single op inject (in memory, on the controller)
+  ansible.builtin.command:
+    argv: [op, inject]
+    stdin: >-
+      {{ query('ansible.builtin.file',
+               *(media_stack_secret_services | map('regex_replace', '^', media_stack_src ~ '/')
+                 | map('regex_replace', '$', '/secrets.env.tpl')))
+         | join(media_stack_secrets_separator) }}
+  register: media_stack_secrets_resolved
+  when: media_stack_secret_services | length > 0
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Fail if op inject failed (stderr only, never the resolved output)
+  ansible.builtin.fail:
+    msg: "op inject failed (rc={{ media_stack_secrets_resolved.rc }}): {{ media_stack_secrets_resolved.stderr | default('') }}"
+  when:
+    - media_stack_secret_services | length > 0
+    - media_stack_secrets_resolved.rc != 0
+
+- name: Split the resolved output per service (in memory)
+  ansible.builtin.set_fact:
+    media_stack_secrets: >-
+      {{ dict(media_stack_secret_services
+              | zip(media_stack_secrets_resolved.stdout.split(media_stack_secrets_separator)
+                    | map('regex_replace', '\n+$', '') | map('regex_replace', '$', '\n'))) }}
+    media_stack_secrets_count: "{{ media_stack_secrets_resolved.stdout.split(media_stack_secrets_separator) | length }}"
+  when: media_stack_secret_services | length > 0
+  no_log: true
+
+- name: One resolved part per secrets template
+  ansible.builtin.assert:
+    that: media_stack_secrets_count | int == media_stack_secret_services | length
+    fail_msg: >-
+      op inject returned {{ media_stack_secrets_count }} parts for {{ media_stack_secret_services | length }}
+      templates; does a template contain the marker line?
+    quiet: true
+  when: media_stack_secret_services | length > 0
+
+- name: Stat the current <svc>/secrets.env on the VM
+  ansible.builtin.stat:
+    path: "{{ media_stack_root }}/{{ item }}/secrets.env"
+    get_checksum: true
+    checksum_algorithm: sha1
+  loop: "{{ media_stack_secret_services }}"
+  register: media_stack_secrets_stat
+
+# Not ansible.builtin.copy: `copy content:` stages the content in a temp file on the controller.
+# Here the resolved secrets travel only in the module arguments (stdin), written atomically.
+- name: Write <svc>/secrets.env on the VM when its content differs (umask 077, atomic)
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - umask 077 && cat > "$1.tmp" && chown "$2" "$1.tmp" && chmod 600 "$1.tmp" && mv -f "$1.tmp" "$1"
+      - sh
+      - "{{ media_stack_root }}/{{ item.item }}/secrets.env"
+      - "{{ media_puid }}:{{ media_pgid }}"
+    stdin: "{{ media_stack_secrets[item.item] }}"
+    stdin_add_newline: false
+  loop: "{{ media_stack_secrets_stat.results }}"
+  when: not item.stat.exists or item.stat.checksum != (media_stack_secrets[item.item] | hash('sha1'))
+  changed_when: true
+  no_log: true
+
+- name: Enforce owner and mode 0600 on <svc>/secrets.env
+  ansible.builtin.file:
+    path: "{{ media_stack_root }}/{{ item }}/secrets.env"
+    state: file
+    owner: "{{ media_puid }}"
+    group: "{{ media_pgid }}"
+    mode: "0600"
+  loop: "{{ media_stack_secret_services }}"
+  when: not ansible_check_mode or media_stack_secrets_stat.results | selectattr('item', 'eq', item) | map(attribute='stat.exists') | first
+
+- name: Docker compose up (recreates only services whose config changed)
+  community.docker.docker_compose_v2:
+    project_src: "{{ media_stack_root }}"
+    files: "{{ media_stack_compose_files }}"
+    env_files: [.env]
+    services: "{{ media_stack_services | default(omit, true) }}"
+    state: present
+    recreate: auto
+    remove_orphans: false

@@ -1,0 +1,8 @@
+---
+# Local stack/ directory to ship (on the Mac). Override to deploy a different checkout or a scratch copy.
+media_stack_src: "{{ playbook_dir }}/../../stack"
+# Services passed to `docker compose up` (empty = all services in the merged Compose files).
+media_stack_services: []
+# Separator between templates in the single `op inject` call: a comment line with real newlines
+# (YAML double quotes) around it; it must not occur in a template.
+media_stack_secrets_separator: "\n# ---- media-stack secrets.env.tpl boundary ----\n"

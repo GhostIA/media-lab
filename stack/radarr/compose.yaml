@@ -1,0 +1,32 @@
+# Radarr (movies). Merged into the media-stack project by stack/deploy.sh (unit 2), which runs
+#   docker compose -f compose.yaml -f radarr/compose.yaml ...   from stack/.
+# Host paths come only from ${DATA_ROOT} / ${CONFIG_ROOT} (shared env, stack/.env.example).
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:7.0.3.10918-ls328
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+      UMASK: ${UMASK:-002}
+      # Forms login, not required from the LAN; leaves room for a later OIDC reverse proxy.
+      RADARR__AUTH__METHOD: Forms
+      RADARR__AUTH__REQUIRED: DisabledForLocalAddresses
+    env_file:
+      # RADARR__AUTH__APIKEY, rendered from secrets.env.tpl by deploy.sh (op inject). Optional.
+      # With `-f` merging, relative paths resolve against the project dir (stack/), hence radarr/.
+      - path: radarr/secrets.env
+        required: false
+    ports:
+      - "7878:7878"
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/radarr:/config
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:7878/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

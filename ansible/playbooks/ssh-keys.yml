@@ -1,0 +1,27 @@
+---
+# Authorize the operator's SSH key (~/.ssh/id_ed25519.pub on the control machine) for root on
+# every PVE node. /etc/pve/priv/authorized_keys is shared cluster-wide via pmxcfs and
+# /root/.ssh/authorized_keys on each node symlinks to it, so the task runs once on one node.
+# Password login stays enabled as a fallback.
+# usage (from ansible/):
+#   ansible-playbook playbooks/ssh-keys.yml --check --diff
+#   ansible-playbook playbooks/ssh-keys.yml
+# First-time bootstrap (key not authorized yet), either:
+#   ansible-playbook playbooks/ssh-keys.yml --ask-pass -e ansible_ssh_private_key_file=
+#     (needs sshpass; root password is in the node's 1Password item, see pve-tools/nodes.txt)
+#   or, one-off: pve-tools/pvessh.sh intel-1ecbc8 \
+#     "echo '$(cat ~/.ssh/id_ed25519.pub)' >> /etc/pve/priv/authorized_keys"
+- name: Operator SSH key for root on the PVE cluster
+  hosts: pve_nodes
+  gather_facts: false
+  vars:
+    ssh_keys_pubkey: "{{ lookup('ansible.builtin.file', '~/.ssh/id_ed25519.pub') }}"
+  tasks:
+    - name: Authorize key in the cluster-shared authorized_keys
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ ssh_keys_pubkey }}"
+        path: /etc/pve/priv/authorized_keys
+        manage_dir: false
+        state: present
+      run_once: true

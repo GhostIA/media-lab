@@ -1,3 +1,9 @@
 .DS_Store
 *.bak*
 *.log
+*.retry
+# ansible-lint / ansible-galaxy local cache
+.ansible/
+# Terraform: local state (D4) and provider cache; .terraform.lock.hcl IS committed
+terraform/.terraform/
+terraform/*.tfstate*

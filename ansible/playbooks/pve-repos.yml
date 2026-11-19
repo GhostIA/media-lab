@@ -1,0 +1,13 @@
+---
+# Switch PVE nodes from the enterprise to the no-subscription repos (PVE + Ceph, deb822).
+# Writes proxmox.sources / ceph.sources, sets "Enabled: no" in pve-enterprise.sources
+# (and ceph-enterprise.sources if present); apt cache is refreshed only when a file changed.
+# Replaces pve-tools/fix-repos.sh.
+# usage (from ansible/):
+#   ansible-playbook playbooks/pve-repos.yml --check --diff
+#   ansible-playbook playbooks/pve-repos.yml [--limit intel-a163f8]
+- name: PVE no-subscription repos
+  hosts: pve_nodes
+  gather_facts: false
+  roles:
+    - pve_repos

@@ -1,0 +1,16 @@
+---
+# No-subscription repos (PVE 9 / Debian trixie, deb822). Each becomes /etc/apt/sources.list.d/<name>.sources
+pve_repos_suite: trixie
+pve_repos_signed_by: /usr/share/keyrings/proxmox-archive-keyring.gpg
+pve_repos_sources:
+  - name: proxmox
+    uris: http://download.proxmox.com/debian/pve
+    components: pve-no-subscription
+  - name: ceph
+    uris: "http://download.proxmox.com/debian/ceph-{{ ceph_release }}"
+    components: no-subscription
+
+# Enterprise repo files that get "Enabled: no" when present (missing files are left alone)
+pve_repos_disabled_files:
+  - pve-enterprise.sources
+  - ceph-enterprise.sources

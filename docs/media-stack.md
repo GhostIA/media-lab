@@ -2,15 +2,19 @@
 
 Operator guide for the media stack on the `media` Proxmox cluster: Jellyfin, Sonarr (TV + anime),
 Radarr, Lidarr, Prowlarr and qBittorrent in one Docker Compose project on VM 200.
-How it was built: [arr-batch-kickstart.md](arr-batch-kickstart.md). Repo rules: [CLAUDE.md](../CLAUDE.md).
+How it was built: [arr-batch-kickstart.md](arr-batch-kickstart.md), then moved to Ansible + Terraform
+([iac-batch-kickstart.md](iac-batch-kickstart.md)). Repo rules: [CLAUDE.md](../CLAUDE.md).
+Playbook reference (prerequisites, inventory, every playbook and tag): [ansible/README.md](../ansible/README.md).
 
-All commands run from the repo root on the Mac unless the prompt says `media@vm`.
+`ansible` / `ansible-playbook` commands run from `ansible/`, `terraform` from `terraform/`, everything
+else from anywhere on the Mac.
 
 ## 1. Architecture
 
 ```
 Mac (repo checkout, op CLI, gh)
- │  ssh media@192.168.8.200            pve-tools/pvessh.sh <node> '<cmd>'  (PVE nodes)
+ │  ssh media@192.168.8.200            ansible <node> -a '<cmd>'  (PVE nodes, from ansible/)
+ │  ansible-playbook (ansible/)        terraform (terraform/, VM 200 definition)
  ▼
 VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.8.123)
  └─ docker compose project "media-stack"   (/opt/media-stack/stack, one -f per stack/<svc>/compose.yaml)
@@ -42,18 +46,18 @@ Owner `1000:1000` (`media`), dirs `2775`, containers run with `PUID=1000 PGID=10
 
 | Item | Value |
 |---|---|
-| VMID / name | `200` / `media-stack` |
+| VMID / name | `200` / `media-stack` (defined in `terraform/`, `prevent_destroy`) |
 | Node | intel-a163f8 (`192.168.8.123`) |
 | OS | Debian 13 (trixie) cloud-init image, docker-ce + compose plugin |
 | IP | `192.168.8.200/24`, gateway `192.168.8.1` (static, via cloud-init) |
 | Sizing | 4 vCPU, 5 GiB RAM |
 | Disks | OS 32G + data 3T (thin), both on `media-ec`; data disk is ext4 mounted at `/data` |
 | Login | `ssh media@192.168.8.200` (key `~/.ssh/id_ed25519.pub`; `media` is uid/gid 1000, in `docker` group) |
-| Stack checkout | `/opt/media-stack/stack` (rsynced from `stack/` by `stack/deploy.sh`, not a git clone) |
+| Stack checkout | `/opt/media-stack/stack` (synced from `stack/` by `playbooks/media-stack.yml`, not a git clone) |
 | App configs | `/opt/media-stack/config/<service>` |
 | Media + downloads | `/data/{torrents,media}/{movies,tv,anime,music}` |
 | Shared env | `stack/.env.example`: `PUID=1000 PGID=1000 UMASK=002 TZ=America/Chicago DATA_ROOT=/data CONFIG_ROOT=/opt/media-stack/config` |
-| Secrets on VM | `/opt/media-stack/stack/<svc>/secrets.env` (mode 600, rendered by `op inject` at deploy, gitignored) |
+| Secrets on VM | `/opt/media-stack/stack/<svc>/secrets.env` (mode 600, rendered from 1Password by `playbooks/media-stack.yml`, gitignored) |
 
 ## 3. Service URLs
 
@@ -84,36 +88,35 @@ ssh media@192.168.8.200 'docker compose -p media-stack ps'
 
 ## 4. Bring-up from scratch
 
-Prerequisites: `op whoami` works, `pve-tools/ceph-setup.sh status` is `HEALTH_OK`, and
-`192.168.8.200` does not answer `ping` (nothing else holds the IP).
+Prerequisites: [ansible/README.md](../ansible/README.md) section 1 (ansible-core, collections,
+Terraform, `op whoami`), the cluster is up (`ansible-playbook playbooks/ceph.yml --tags status` is
+`HEALTH_OK`; cluster bring-up is in ansible/README.md section 4), the Terraform API token exists
+(`playbooks/pve-terraform-token.yml`), and `192.168.8.200` does not answer `ping` (nothing else holds the IP).
 
 | # | Step | Command |
 |---|---|---|
-| 1 | Download the Debian 13 cloud image to the node | `pve-tools/vm-media-stack.sh image` |
-| 2 | Create VM 200 (disks on `media-ec`, cloud-init user/IP/key) | `pve-tools/vm-media-stack.sh create` |
-| 3 | Boot it | `pve-tools/vm-media-stack.sh start` |
-| 4 | Install Docker, format/mount `/data`, create the `/data` tree and `/opt/media-stack` | `pve-tools/vm-media-stack.sh bootstrap` |
-| 5 | Check VM, disks, docker, `/data` | `pve-tools/vm-media-stack.sh status` |
-| 6 | Create the 1Password item `media-stack` with generated API keys / password (idempotent) | `stack/secrets-init.sh` |
-| 7 | Sync `stack/`, render `secrets.env`, `docker compose up -d` | `stack/deploy.sh` |
-| 8 | qBittorrent: password, save path, categories `movies tv anime music` | `stack/qbittorrent/configure.sh` |
-| 9 | Sonarr: root folders `/data/media/tv` + `/data/media/anime`, download client | `stack/sonarr/configure.sh` |
-| 10 | Radarr: root folder `/data/media/movies`, download client | `stack/radarr/configure.sh` |
-| 11 | Lidarr: root folder `/data/media/music`, download client | `stack/lidarr/configure.sh` |
-| 12 | Prowlarr: app sync to Sonarr, Radarr, Lidarr | `stack/prowlarr/configure.sh` |
-| 13 | Jellyfin first-run wizard (below) | browser |
-| 14 | Add indexers in Prowlarr (manual, below) | browser |
+| 1 | Download the Debian 13 cloud image, create VM 200 (disks on `media-ec`, cloud-init user/IP/key), boot it | `cd terraform && terraform init && op run --env-file .env.op -- terraform apply` |
+| 2 | Install Docker + rsync, format (only if blank) and mount `/data`, create the `/data` tree and `/opt/media-stack` | `ansible-playbook playbooks/media-host.yml` |
+| 3 | Check VM and `/data` | `ansible intel-a163f8 -a 'qm status 200'`, `ssh media@192.168.8.200 'df -h /data; ls /data/*'` |
+| 4 | Create the 1Password item `media-stack` with generated API keys / password (only missing fields) | `ansible-playbook playbooks/secrets-init.yml` |
+| 5 | Sync `stack/`, render `secrets.env`, `docker compose up` | `ansible-playbook playbooks/media-stack.yml` |
+| 6 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` | `ansible-playbook playbooks/arr-config.yml` |
+| 7 | qBittorrent password, save path, categories `movies tv anime music`; Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 8 | Download client qBittorrent in Sonarr (plus the `anime` client, section 6), Radarr, Lidarr | browser: Settings → Download Clients |
+| 9 | Jellyfin first-run wizard (below) | browser |
+| 10 | Add indexers in Prowlarr (manual, below) | browser |
 
-Every script is safe to rerun; see its header comment for options. `stack/deploy.sh` takes optional
-service names (`stack/deploy.sh sonarr radarr`) to deploy only those.
+Every playbook is safe to rerun and must report `changed=0` on a converged host; run it with
+`--check --diff` first. `media-stack.yml` only recreates containers whose definition changed, and
+never runs `docker compose down` (a removed service must be taken down by hand).
 
-Order matters for 8-12: qBittorrent must be configured before the *arrs add it as a download client,
-and the *arrs must be up before Prowlarr syncs to them.
+Order matters for 5-7: the stack must be up before the API playbooks run, and the *arrs must be up
+before Prowlarr syncs to them.
 
 **Jellyfin first-run wizard** (http://192.168.8.200:8096):
 
 1. Language, then create the admin user. Store it in 1Password yourself (it is not generated by
-   `secrets-init.sh`).
+   `playbooks/secrets-init.yml`).
 2. Add libraries:
 
    | Library | Content type | Folder |
@@ -165,7 +168,7 @@ curl -fsS -H "X-Api-Key: $(op read 'op://xmjfgnsondcvlqa6bovelwdztm/media-stack/
 |---|---|
 | Jellyfin | Admin user from the wizard (section 4) |
 | Sonarr / Radarr / Lidarr / Prowlarr | No prompt from the LAN; API key in the field above |
-| qBittorrent | User `admin`, password `qbittorrent_password` (set by `stack/qbittorrent/configure.sh`) |
+| qBittorrent | User `admin`, password `qbittorrent_password` (set by `playbooks/qbt-prowlarr-config.yml`) |
 
 ## 6. Sonarr: TV vs anime
 
@@ -182,8 +185,8 @@ One Sonarr instance, two root folders:
 When adding an anime series: choose root folder `/data/media/anime`, Series Type **Anime** and the anime
 profile, and give it the `anime` tag. Check in qBittorrent that anime grabs land under category `anime`:
 Sonarr's download client uses one category, so anime routing relies on a second qBittorrent download
-client (category `anime`, restricted to tag `anime`) as set up by `stack/sonarr/configure.sh`; if it is
-missing, add it under Settings → Download Clients. A series
+client (category `anime`, restricted to tag `anime`). No playbook creates the *arr download clients:
+add both under Settings → Download Clients (section 4 step 8). A series
 added to the wrong root folder can be moved with Series → Edit → Root Folder (Sonarr moves the files).
 
 ## 7. Backup and restore
@@ -203,7 +206,7 @@ scp 'media@192.168.8.200:/tmp/media-config-*.tgz' ~/Backups/      # copy off the
 ssh media@192.168.8.200 'sudo rm -f /tmp/media-config-*.tgz'
 ```
 
-Restore onto a fresh VM (after section 4 steps 1-6):
+Restore onto a fresh VM (after section 4 steps 1-4):
 
 ```sh
 scp ~/Backups/media-config-YYYY-MM-DD.tgz media@192.168.8.200:/tmp/
@@ -211,18 +214,19 @@ ssh media@192.168.8.200 'set -e
   docker compose -p media-stack stop 2>/dev/null || true
   sudo tar -C /opt/media-stack -xzf /tmp/media-config-YYYY-MM-DD.tgz
   sudo chown -R 1000:1000 /opt/media-stack/config'
-stack/deploy.sh
+cd ansible && ansible-playbook playbooks/media-stack.yml
 ```
 
 API keys come back from 1Password via the env vars, so the restored configs and the keys match.
 
-**Option B: `vzdump` of VM 200 without the data disk.** Mark the 3T disk `backup=0` once (keep its
-other options; check the bus/name with `qm config 200`):
+**Option B: `vzdump` of VM 200 without the data disk.** Exclude the 3T disk from backups in
+Terraform, not with `qm set` (Terraform owns VM 200's config and would revert a manual change): set
+`backup = false` on the data disk in `terraform/`, then `terraform plan` must show only an in-place
+update of VM 200 (never a replace), and apply. Then (from `ansible/`):
 
 ```sh
-pve-tools/pvessh.sh intel-a163f8 'qm config 200 | grep -E "^(scsi|virtio|sata)[0-9]"'
-pve-tools/pvessh.sh intel-a163f8 'qm set 200 --scsi1 media-ec:vm-200-disk-1,backup=0'   # adjust to the line above
-pve-tools/pvessh.sh intel-a163f8 'vzdump 200 --mode snapshot --compress zstd --storage <backup-storage>'
+ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep -E "^(scsi|virtio|sata)[0-9]"'   # data disk shows backup=0
+ansible intel-a163f8 -a 'vzdump 200 --mode snapshot --compress zstd --storage <backup-storage>'
 ```
 
 `media-ec` only holds `images,rootdir`, so `<backup-storage>` must be a storage with `backup`
@@ -239,8 +243,8 @@ object is 2 data + 1 parity chunk on 3 different hosts.
 | Second OSD/host failure before recovery completes | PGs on both lose data: the RBD image (and the ext4 on it) is damaged; treat `/data` as lost |
 | Only 4 OSD hosts | After one permanent loss, 3 hosts remain = exactly k+m, so the pool is still placeable but has no spare host |
 
-Ceph redundancy is not a backup. If `/data` is lost: recreate the data disk, rerun
-`pve-tools/vm-media-stack.sh bootstrap` for the tree, restore configs, and let the *arrs re-search
+Ceph redundancy is not a backup. If `/data` is lost: recreate the data disk (`terraform/`), rerun
+`ansible-playbook playbooks/media-host.yml` for the filesystem and tree, restore configs, and let the *arrs re-search
 (they still know every series/movie/album that was monitored: Wanted → Missing → Search All).
 
 ## 8. Upgrade procedure
@@ -252,13 +256,14 @@ Images are pinned (`lscr.io/linuxserver/<app>:<version>`), never `latest`.
 2. Back up configs (section 7, option A). An *arr database migration cannot be undone by rolling the
    tag back.
 3. Bump the tag in `stack/<svc>/compose.yaml` on a branch, open a PR, merge.
-4. Deploy just that service from `main`:
+4. Deploy from `main` (compose recreates only the service whose tag changed):
    ```sh
-   stack/deploy.sh sonarr
+   cd ansible && ansible-playbook playbooks/media-stack.yml --check --diff
+   ansible-playbook playbooks/media-stack.yml
    ```
 5. Verify: health check from section 3, `docker compose -p media-stack ps` shows it `running`
    (`healthy` where a healthcheck exists), and the app's System → Status shows the new version.
-6. Rollback: revert the tag commit, `stack/deploy.sh <svc>`. If the new version migrated the database,
+6. Rollback: revert the tag commit, rerun `playbooks/media-stack.yml`. If the new version migrated the database,
    also restore `/opt/media-stack/config/<svc>` from the backup taken in step 2 (stop the service first).
 
 VM OS updates: `ssh media@192.168.8.200 'sudo apt-get update && sudo apt-get -y upgrade'`; reboot if
@@ -271,24 +276,25 @@ the kernel changed (containers come back by their restart policy).
 | Imports copy instead of hardlink (slow, double space) | Source and target must be on the same filesystem under the single `/data` mount, with the same path in qBittorrent and the *arrs. No per-folder mounts like `/downloads` or `/tv`. Test: `ssh media@192.168.8.200 'touch /data/torrents/tv/t && ln /data/torrents/tv/t /data/media/tv/t && stat -c %i /data/torrents/tv/t /data/media/tv/t; rm -f /data/torrents/tv/t /data/media/tv/t'` (same inode twice) |
 | *arr "Access denied" / "folder not writable" | Everything is owned by `1000:1000`, dirs `2775`, `PUID=1000 PGID=1000 UMASK=002`. Fix: `ssh media@192.168.8.200 'sudo chown -R 1000:1000 /data /opt/media-stack/config && sudo find /data -type d -exec chmod 2775 {} +'` |
 | Container restarting | `ssh media@192.168.8.200 'docker compose -p media-stack logs --tail 100 <svc>'` |
-| Deploy fails at secrets | `op whoami`; check the field exists in item `media-stack`; rerun `stack/secrets-init.sh` (idempotent) |
-| *arr can't reach qBittorrent / Prowlarr sync fails | Rerun `stack/qbittorrent/configure.sh`, then the *arr's `configure.sh`, then `stack/prowlarr/configure.sh` |
-| `/data` slow or I/O errors | Ceph health: `pve-tools/ceph-setup.sh status` (expect `HEALTH_OK`, 4 OSDs up/in) |
-| VM won't start | `pve-tools/pvessh.sh intel-a163f8 'qm status 200; qm start 200'`; Ceph must have quorum (3 MONs) |
+| Deploy fails at secrets | `op whoami`; check the field exists in item `media-stack`; rerun `ansible-playbook playbooks/secrets-init.yml` (only adds missing fields) |
+| *arr can't reach qBittorrent / Prowlarr sync fails | Rerun `ansible-playbook playbooks/qbt-prowlarr-config.yml`, then check the *arr's download client (Settings → Download Clients → Test) |
+| `/data` slow or I/O errors | Ceph health: `ansible-playbook playbooks/ceph.yml --tags status` (expect `HEALTH_OK`, 4 OSDs up/in) |
+| VM won't start | `ansible intel-a163f8 -a 'qm status 200'`, then `ansible intel-a163f8 -a 'qm start 200'`; Ceph must have quorum (3 MONs) |
+| Playbook run reports `changed` on a working host | Do not "fix" the host: run with `--check --diff`, read the diff, fix the role |
 
 **osd.1 pending sectors.** osd.1 (Seagate 4TB HDD on intel-177e78, serial `W8002A8K`) had 48 pending
 sectors when it was added. Check it regularly; a rising count means replace the disk before it fails:
 
 ```sh
-pve-tools/pvessh.sh intel-177e78 'smartctl -A $(lsblk -dnpo NAME,SERIAL | awk "\$2==\"W8002A8K\"{print \$1}") | grep -Ei "pending|realloc|uncorrect"'
-pve-tools/ceph-setup.sh status
+ansible intel-177e78 -m ansible.builtin.shell -a 'smartctl -A $(lsblk -dnpo NAME,SERIAL | awk "\$2==\"W8002A8K\"{print \$1}") | grep -Ei "pending|realloc|uncorrect"'
+ansible-playbook playbooks/ceph.yml --tags status
 ```
 
 ## 10. Follow-ups
 
 | Item | Notes |
 |---|---|
-| Jellyfin HW transcoding | intel-a163f8 has an Intel UHD 630. Needs `intel_iommu=on` on the node's kernel cmdline + reboot (check with `dmesg \| grep -e DMAR -e IOMMU`), then either full iGPU passthrough to VM 200 or GVT-g (mediated device, `i915.enable_gvt=1` + `kvmgt`). Inside the VM, pass `/dev/dri` to the Jellyfin container (`devices: [/dev/dri:/dev/dri]`, render group) and enable QSV/VA-API in Dashboard → Playback. Passthrough pins VM 200 to intel-a163f8 (no live migration). Until then: software transcoding |
+| Jellyfin HW transcoding | intel-a163f8 has an Intel UHD 630. IOMMU is already on there (PVE kernel default; `dmesg \| grep -e DMAR -e IOMMU`), so no `intel_iommu=on` is needed. Blockers: GVT-g is not enabled (`i915.enable_gvt=1` on the kernel cmdline + `kvmgt` module, needs a **node reboot**, so migrate or stop VM 200 first) and VM 200 has no `hostpci` device (add the GVT-g mdev or full iGPU passthrough in `terraform/`, not with `qm set`). Inside the VM, pass `/dev/dri` to the Jellyfin container (`devices: [/dev/dri:/dev/dri]`, render group) and enable QSV/VA-API in Dashboard → Playback. Passthrough pins VM 200 to intel-a163f8 (no live migration). Until then: software transcoding |
 | OIDC reverse proxy | oauth2-proxy + Caddy or Traefik with Auth0 in front of each port; then bind the app ports to localhost / the proxy network only and switch the *arrs to `External` auth or keep Forms behind the proxy. Apps need no changes beyond that |
 | EC `min_size` | Currently 2 on `media-ec-data`: stays writable with one host down but with zero margin. Decide between availability (2) and safety (3 = pause I/O until recovery) |
 | VPN for qBittorrent | If wanted: route only the qBittorrent container through a VPN container (e.g. gluetun, `network_mode: service:gluetun`), move port 8080 to the VPN container, and update the *arr download client host |

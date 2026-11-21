@@ -10,6 +10,8 @@
 #   download_client  {category_field, category}: the qBittorrent category this app's download client
 #                sends grabs to; category_field is the field name in the app's QBittorrent schema
 #                (GET /api/<v>/downloadclient/schema). Omit to leave the app's download clients alone.
+#                Optional client: keys merged over arr_config_download_client for this app only
+#                (name, host, port, username, password_field), e.g. a dedicated qBittorrent instance.
 #   extra.body      keys merged into every POST body of this app
 #   extra.profiles  {<body key>: {endpoint, name}}: the id of the profile called <name> from
 #                   GET /api/<v>/<endpoint>, else the lowest id; only looked up when a POST is needed
@@ -36,7 +38,17 @@ arr_config_apps:
     api_version: v1
     folders:
       - {path: /data/media/music, name: Music}
-    download_client: {category_field: musicCategory, category: music}
+    # Lidarr has its own qBittorrent instance (stack/qbittorrent-lidarr). The old shared client
+    # "qBittorrent" is no longer managed for Lidarr: it was left at priority 50 so grabs already
+    # queued there still import; delete it in Lidarr once that queue is empty.
+    download_client:
+      category_field: musicCategory
+      category: music
+      client:
+        name: qBittorrent (Lidarr)
+        host: qbittorrent-lidarr
+        port: 8081
+        password_field: qbittorrent_lidarr_password
     extra:
       body:
         defaultMonitorOption: all
@@ -46,14 +58,16 @@ arr_config_apps:
         defaultQualityProfileId: {endpoint: qualityprofile, name: Any}
         defaultMetadataProfileId: {endpoint: metadataprofile, name: Standard}
 
-# qBittorrent download client added to every app with a download_client entry (matched by name).
-# host is the compose service name: the apps reach qBittorrent on the media-stack network. The
-# password is the 1Password field qbittorrent_password of arr_config_op_item.
+# qBittorrent download client added to every app with a download_client entry (matched by name),
+# unless the app's download_client.client overrides some keys. host is the compose service name:
+# the apps reach qBittorrent on the media-stack network. password_field is the 1Password field of
+# arr_config_op_item holding the WebUI password.
 arr_config_download_client:
   name: qBittorrent
   host: qbittorrent
   port: 8080
   username: admin
+  password_field: qbittorrent_password
 
 # 1Password item holding the <app>_api_key and qbittorrent_password fields (vault: op_vault from group_vars/all.yml).
 arr_config_op_item: media-stack

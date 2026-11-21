@@ -2,7 +2,17 @@
 # 1Password item (vault {{ op_vault }}) holding the stack credentials
 qbt_prowlarr_config_op_item: media-stack
 
-# qBittorrent WebUI (API v2)
+# qBittorrent instances (WebUI API v2), all on the media VM. Each gets the same preferences and its own
+# categories; password_field is the 1Password field in qbt_prowlarr_config_op_item.
+#   qbittorrent         Radarr + Sonarr (and the Prowlarr download client below)
+#   qbittorrent-lidarr  Lidarr only
+qbt_prowlarr_config_qbt_instances:
+  - {container: qbittorrent, port: 8080, password_field: qbittorrent_password,
+     categories: "{{ media_categories }}"}
+  - {container: qbittorrent-lidarr, port: 8081, password_field: qbittorrent_lidarr_password,
+     categories: [music]}
+# Defaults for the first instance. Inside the per-instance loop (tasks/main.yml) qbt_url, qbt_container,
+# qbt_password and qbt_categories are overridden; Prowlarr's reachability probe uses qbt_url as set here.
 qbt_prowlarr_config_qbt_url: "http://{{ media_vm.ip }}:8080"
 qbt_prowlarr_config_qbt_user: admin
 qbt_prowlarr_config_qbt_save_root: "{{ media_data_root }}/torrents"
@@ -15,6 +25,12 @@ qbt_prowlarr_config_qbt_prefs:
   torrent_changed_tmm_enabled: true
   save_path_changed_tmm_enabled: true
   category_changed_tmm_enabled: true
+  # Torrent queueing, per instance (qBittorrent defaults are 3 downloads / 5 torrents, which left
+  # most grabs queued). max_active_torrents caps downloads + uploads together.
+  queueing_enabled: true
+  max_active_downloads: 10
+  max_active_uploads: 10
+  max_active_torrents: 15
 # container whose `docker logs` carry the temporary password on a fresh install
 qbt_prowlarr_config_qbt_container: qbittorrent
 

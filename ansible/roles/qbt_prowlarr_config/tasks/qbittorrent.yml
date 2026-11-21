@@ -1,5 +1,7 @@
 ---
-# qBittorrent WebUI API v2: permanent WebUI password, preferences, categories.
+# qBittorrent WebUI API v2 for ONE instance: permanent WebUI password, preferences, categories.
+# Included once per qbt_prowlarr_config_qbt_instances entry (tasks/main.yml sets qbt_url, qbt_container,
+# qbt_password, qbt_password_field and qbt_categories for it).
 # Never changes the password when the 1Password one already works.
 
 # Each failed login counts towards qBittorrent's IP ban (5 by default), so only the password that can
@@ -31,13 +33,13 @@
 - name: Log in with the permanent WebUI password
   ansible.builtin.include_tasks: qbt_login.yml
   vars:
-    qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_secrets.qbittorrent_password }}"
+    qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_qbt_password }}"
   when: qbt_prowlarr_config_pw_state != 'unset'
 
 - name: Fail when the permanent password is rejected although one is set
   ansible.builtin.fail:
     msg: >-
-      qBittorrent rejected the password from 1Password ({{ qbt_prowlarr_config_op_item }}/qbittorrent_password)
+      qBittorrent rejected the password from 1Password ({{ qbt_prowlarr_config_op_item }}/{{ qbt_prowlarr_config_qbt_password_field }})
       although a WebUI password is set. Not retrying (IP ban after 5 failures).
   when: qbt_prowlarr_config_pw_state == 'set' and not qbt_prowlarr_config_qbt_logged_in
 
@@ -100,7 +102,7 @@
         method: POST
         body_format: form-urlencoded
         body:
-          json: "{{ {'web_ui_password': qbt_prowlarr_config_secrets.qbittorrent_password} | to_json }}"
+          json: "{{ {'web_ui_password': qbt_prowlarr_config_qbt_password} | to_json }}"
         headers:
           Referer: "{{ qbt_prowlarr_config_qbt_url }}"
           Cookie: "{{ qbt_prowlarr_config_qbt_cookie }}"
@@ -111,7 +113,7 @@
     - name: Log in again with the permanent WebUI password
       ansible.builtin.include_tasks: qbt_login.yml
       vars:
-        qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_secrets.qbittorrent_password }}"
+        qbt_prowlarr_config_login_password: "{{ qbt_prowlarr_config_qbt_password }}"
       when: not ansible_check_mode
 
     - name: Fail when the new permanent password is rejected

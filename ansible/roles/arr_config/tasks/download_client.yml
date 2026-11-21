@@ -2,7 +2,9 @@
 # qBittorrent download client of one *arr app (arr_config_app.download_client). Included from
 # app.yml inside the per-app block: arr_config_api and arr_config_api_key are set there, and a
 # failure here is rescued there like the root-folder tasks.
-# The entry is matched by name (arr_config_download_client.name, case-insensitive like the apps'
+# The client is arr_config_download_client merged with arr_config_app.download_client.client (per-app
+# override, e.g. Lidarr's own qBittorrent instance) as arr_config_dc.
+# The entry is matched by name (arr_config_dc.name, case-insensitive like the apps'
 # own uniqueness check); other clients (e.g. a tagged anime client) are left alone.
 #   missing  -> POST built from the QBittorrent schema: host, port, useSsl=false, username, password,
 #               <category_field>=<category>, name, enable, priority; every other field at its default.
@@ -13,11 +15,15 @@
 #               wrong password, or qBittorrent unreachable; then the PUT fails too and the app is
 #               reported as failed). Any other test status is an error, not a change.
 # changed only when a POST/PUT happens (in check mode: when one would happen).
+- name: "Resolve this app's download client | {{ arr_config_app.app }}"
+  ansible.builtin.set_fact:
+    arr_config_dc: "{{ arr_config_download_client | combine(arr_config_app.download_client.client | default({})) }}"
+
 - name: "Check the qBittorrent password was read | {{ arr_config_app.app }}"
   ansible.builtin.assert:
-    that: arr_config_api_keys.qbittorrent_password | default('') | length > 0
+    that: arr_config_api_keys[arr_config_dc.password_field] | default('') | length > 0
     fail_msg: >-
-      {{ arr_config_app.app }}: could not read field qbittorrent_password of 1Password item
+      {{ arr_config_app.app }}: could not read field {{ arr_config_dc.password_field }} of 1Password item
       {{ arr_config_op_item }} (vault {{ op_vault }}). Download client not configured.
     quiet: true
 
@@ -48,12 +54,12 @@
 - name: "Compare the download client with the wanted one | {{ arr_config_app.app }}"
   ansible.builtin.set_fact:
     arr_config_dc_current: >-
-      {{ arr_config_dcs.json | selectattr('name', 'match', '(?i)^' ~ (arr_config_download_client.name | regex_escape) ~ '$') | first | default(none) }}
+      {{ arr_config_dcs.json | selectattr('name', 'match', '(?i)^' ~ (arr_config_dc.name | regex_escape) ~ '$') | first | default(none) }}
     arr_config_dc_want: >-
-      {{ {'host': arr_config_download_client.host,
-          'port': arr_config_download_client.port | int,
+      {{ {'host': arr_config_dc.host,
+          'port': arr_config_dc.port | int,
           'useSsl': false,
-          'username': arr_config_download_client.username,
+          'username': arr_config_dc.username,
           arr_config_app.download_client.category_field: arr_config_app.download_client.category} }}
 
 # A managed field the existing entry does not have (e.g. a wrong category_field) would differ on
@@ -115,7 +121,7 @@
 - name: "Report download client | {{ arr_config_app.app }}"
   ansible.builtin.debug:
     msg: >-
-      {{ arr_config_app.app }}: download client {{ arr_config_download_client.name }}
+      {{ arr_config_app.app }}: download client {{ arr_config_dc.name }}
       {{ 'missing' if arr_config_dc_current is none
          else 'differs in ' ~ (arr_config_dc_diff | join(', ')) if arr_config_dc_diff | length > 0
          else 'matches, test ' ~ ('passed' if arr_config_dc_test.status | default(-1) in [200, 204]
@@ -127,7 +133,7 @@
   ansible.builtin.debug:
     msg: >-
       {{ arr_config_app.app }}: would {{ 'POST' if arr_config_dc_action == 'add' else 'PUT' }}
-      {{ arr_config_download_client.name }} ({{ arr_config_download_client.host }}:{{ arr_config_download_client.port }},
+      {{ arr_config_dc.name }} ({{ arr_config_dc.host }}:{{ arr_config_dc.port }},
       {{ arr_config_app.download_client.category_field }}={{ arr_config_app.download_client.category }})
   changed_when: true
   when: ansible_check_mode and arr_config_dc_action != 'none'
@@ -172,7 +178,7 @@
     body_format: json
     body: >-
       {{ arr_config_dc_schema_entry | dict2items | rejectattr('key', 'eq', 'id') | items2dict
-         | combine({'name': arr_config_download_client.name, 'enable': true, 'priority': 1,
+         | combine({'name': arr_config_dc.name, 'enable': true, 'priority': 1,
                     'fields': arr_config_dc_schema_entry.fields
                               | rejectattr('name', 'in', arr_config_dc_set.keys() | list) | list
                               + (arr_config_dc_set | dict2items(key_name='name', value_name='value'))}) }}
@@ -182,7 +188,7 @@
   vars:
     arr_config_dc_schema_entry: >-
       {{ arr_config_dc_schema.json | selectattr('implementation', 'eq', 'QBittorrent') | first }}
-    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys.qbittorrent_password}) }}"
+    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys[arr_config_dc.password_field]}) }}"
   register: arr_config_dc_post
   changed_when: arr_config_dc_post.status | default(-1) in [200, 201]
   failed_when: false
@@ -206,7 +212,7 @@
     return_content: true
     timeout: 60
   vars:
-    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys.qbittorrent_password}) }}"
+    arr_config_dc_set: "{{ arr_config_dc_want | combine({'password': arr_config_api_keys[arr_config_dc.password_field]}) }}"
   register: arr_config_dc_put
   changed_when: arr_config_dc_put.status | default(-1) in [200, 202]
   failed_when: false
@@ -220,7 +226,7 @@
       {{ arr_config_app.app }}: {{ 'POST' if arr_config_dc_action == 'add' else 'PUT' }}
       {{ arr_config_api }}/downloadclient -> {{ arr_config_dc_write.status | default(-1) }}
       {{ arr_config_dc_write.json | default(arr_config_dc_write.msg | default('')) }}. A 400 usually means
-      the app cannot reach qBittorrent at {{ arr_config_download_client.host }}:{{ arr_config_download_client.port }}
+      the app cannot reach qBittorrent at {{ arr_config_dc.host }}:{{ arr_config_dc.port }}
       or the password was rejected.
     quiet: true
   vars:

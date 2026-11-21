@@ -1,6 +1,6 @@
 # qBittorrent
 
-Download client for the *arr stack. Image `lscr.io/linuxserver/qbittorrent` (pinned tag in `compose.yaml`).
+Download client for Radarr and Sonarr (Lidarr has its own instance, [`stack/qbittorrent-lidarr`](../qbittorrent-lidarr/README.md)). Image `lscr.io/linuxserver/qbittorrent` (pinned tag in `compose.yaml`).
 
 | | |
 |---|---|
@@ -42,6 +42,8 @@ To log in by hand before that, read the temporary password with
 ## Settings applied
 
 - Default save path `/data/torrents`, no separate incomplete-downloads folder.
+- Queue: 10 active downloads, 10 active uploads, 15 active torrents in total (qBittorrent's defaults
+  are 3 / 3 / 5). Set in `qbt_prowlarr_config_qbt_prefs`, applied to both instances.
 - Automatic Torrent Management is the default mode (torrents are placed by category), and torrents
   are relocated when their category or the category path changes.
 - Categories, each with save path `/data/torrents/<category>`:
@@ -51,6 +53,6 @@ To log in by hand before that, read the temporary password with
 | `movies` | Radarr |
 | `tv` | Sonarr (TV) |
 | `anime` | Sonarr (anime) |
-| `music` | Lidarr |
+| `music` | Lidarr until its queue here drains (new grabs go to `qbittorrent-lidarr`) |
 
 Set the matching category in each *arr's qBittorrent download client.

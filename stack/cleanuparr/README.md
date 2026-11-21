@@ -24,6 +24,8 @@ a new one). Then under **Settings**:
 
 1. **Download Clients** → add **qBittorrent**: host `http://qbittorrent:8080`, user `admin`, password
    `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/qbittorrent_password`. Test, save.
+   Add the Lidarr instance the same way: host `http://qbittorrent-lidarr:8081`, password
+   `qbittorrent_lidarr_password`.
 2. **Arrs** → add each app with its container URL and API key (`op read
    op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<app>_api_key`):
    Sonarr `http://sonarr:8989`, Radarr `http://radarr:7878`, Lidarr `http://lidarr:8686`.

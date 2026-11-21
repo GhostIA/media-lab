@@ -27,7 +27,8 @@ VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.
      ├─ cleanuparr   :11011  queue cleanup: stalled/failed/malware/orphaned downloads (qbittorrent + *arrs)
      ├─ flaresolverr (8191, internal only)  Cloudflare solver, Prowlarr indexer proxy (tag flaresolverr)
      ├─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr
-     └─ qbittorrent  :8080   downloads into           /data/torrents/<category>
+     ├─ qbittorrent  :8080   radarr + sonarr downloads /data/torrents/{movies,tv,anime}
+     └─ qbittorrent-lidarr :8081  lidarr downloads    /data/torrents/music
  │
  ├─ OS disk   32G  (ext4 /)                ─┐
  └─ data disk 3T   (ext4 /data)            ─┴─ PVE storage "media-ec" (RBD)
@@ -78,6 +79,7 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 | Seerr | http://192.168.8.200:5055 | `curl -fsS http://192.168.8.200:5055/api/v1/status` | JSON with `"version"` |
 | Cleanuparr | http://192.168.8.200:11011 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:11011/health` | `200` |
 | qBittorrent | http://192.168.8.200:8080 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8080/` | `200` |
+| qBittorrent (Lidarr) | http://192.168.8.200:8081 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8081/` | `200` |
 
 All at once:
 
@@ -107,8 +109,8 @@ Terraform, `op whoami`), the cluster is up (`ansible-playbook playbooks/ceph.yml
 | 3 | Check VM and `/data` | `ansible intel-a163f8 -a 'qm status 200'`, `ssh media@192.168.8.200 'df -h /data; ls /data/*'` |
 | 4 | Create the 1Password item `media-stack` with generated API keys / password (only missing fields) | `ansible-playbook playbooks/secrets-init.yml` |
 | 5 | Sync `stack/`, render `secrets.env`, `docker compose up` | `ansible-playbook playbooks/media-stack.yml` |
-| 6 | qBittorrent password, save path, categories `movies tv anime music`; Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
-| 7 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music`; download client qBittorrent (`qbittorrent:8080`, user `admin`) in Sonarr (category `tv`), Radarr (`movies`), Lidarr (`music`) | `ansible-playbook playbooks/arr-config.yml` |
+| 6 | qBittorrent passwords, save path, queue limits (10 downloads / 10 uploads / 15 active), categories `movies tv anime music` (`qbittorrent`) and `music` (`qbittorrent-lidarr`); Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 7 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music`; download client qBittorrent (`qbittorrent:8080`, user `admin`) in Sonarr (category `tv`) and Radarr (`movies`); `qBittorrent (Lidarr)` (`qbittorrent-lidarr:8081`) in Lidarr (`music`) | `ansible-playbook playbooks/arr-config.yml` |
 | 8 | Jellyfin first-run wizard (below) | browser |
 | 9 | Add indexers in Prowlarr (manual, below) | browser |
 
@@ -156,7 +158,8 @@ Credentials live in 1Password item **`media-stack`** in vault **Lab** (`xmjfgnso
 | `lidarr_api_key` | Lidarr API, Prowlarr app sync |
 | `prowlarr_api_key` | Prowlarr API |
 | `aurral_api_key` | Aurral admin API key (`AURRAL_API_KEY`, 64 hex) |
-| `qbittorrent_password` | qBittorrent web UI (user `admin`), *arr download client |
+| `qbittorrent_password` | qBittorrent web UI (user `admin`), Radarr/Sonarr/Prowlarr download client |
+| `qbittorrent_lidarr_password` | qBittorrent (Lidarr) web UI on :8081 (user `admin`), Lidarr download client |
 
 Read one value (prints it, so only in your own terminal):
 

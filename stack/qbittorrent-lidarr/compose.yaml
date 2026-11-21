@@ -1,0 +1,32 @@
+# Second qBittorrent instance, used only by Lidarr (music). Radarr and Sonarr keep stack/qbittorrent.
+# Deployed by playbooks/media-stack.yml (-f after stack/compose.yaml, project media-stack); configured
+# (password, save path, category `music`) by playbooks/qbt-prowlarr-config.yml.
+# WebUI http://<vm-ip>:8081, auth stays on (no subnet whitelist). Same image tag as stack/qbittorrent.
+services:
+  qbittorrent-lidarr:
+    image: lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls487
+    container_name: qbittorrent-lidarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/Chicago}
+      - UMASK=${UMASK:-002}
+      # linuxserver image: WEBUI_PORT moves the port inside the container, so host and container
+      # sides must match (8081:8081, not 8081:8080)
+      - WEBUI_PORT=8081
+      - TORRENTING_PORT=6882
+    ports:
+      - "8081:8081"
+      - "6882:6882/tcp"
+      - "6882:6882/udp"
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/qbittorrent-lidarr:/config
+      # same /data as Lidarr, so imports from /data/torrents/music stay hardlinks
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

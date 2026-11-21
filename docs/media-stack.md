@@ -27,7 +27,8 @@ VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.
      ├─ cleanuparr   :11011  queue cleanup: stalled/failed/malware/orphaned downloads (qbittorrent + *arrs)
      ├─ flaresolverr (8191, internal only)  Cloudflare solver, Prowlarr indexer proxy (tag flaresolverr)
      ├─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr
-     └─ qbittorrent  :8080   downloads into           /data/torrents/<category>
+     ├─ qbittorrent  :8080   radarr + sonarr downloads /data/torrents/{movies,tv,anime}
+     └─ qbittorrent-lidarr :8081  lidarr downloads    /data/torrents/music
  │
  ├─ OS disk   32G  (ext4 /)                ─┐
  └─ data disk 3T   (ext4 /data)            ─┴─ PVE storage "media-ec" (RBD)
@@ -51,7 +52,7 @@ Owner `1000:1000` (`media`), dirs `2775`, containers run with `PUID=1000 PGID=10
 | Item | Value |
 |---|---|
 | VMID / name | `200` / `media-stack` (defined in `terraform/`, `prevent_destroy`) |
-| Node | intel-a163f8 (`192.168.8.123`) |
+| Node | intel-a163f8 (`192.168.8.123`), home node. HA (`terraform/ha.tf`) restarts it on intel-d1babf, then intel-1ecbc8 / intel-177e78, after a node failure (~2-4 min; memory-limited, see [terraform/README.md](../terraform/README.md#high-availability-hatf)) |
 | OS | Debian 13 (trixie) cloud-init image, docker-ce + compose plugin |
 | IP | `192.168.8.200/24`, gateway `192.168.8.1` (static, via cloud-init) |
 | Sizing | 4 vCPU, 5 GiB RAM |
@@ -78,6 +79,7 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 | Seerr | http://192.168.8.200:5055 | `curl -fsS http://192.168.8.200:5055/api/v1/status` | JSON with `"version"` |
 | Cleanuparr | http://192.168.8.200:11011 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:11011/health` | `200` |
 | qBittorrent | http://192.168.8.200:8080 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8080/` | `200` |
+| qBittorrent (Lidarr) | http://192.168.8.200:8081 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8081/` | `200` |
 
 All at once:
 
@@ -107,8 +109,8 @@ Terraform, `op whoami`), the cluster is up (`ansible-playbook playbooks/ceph.yml
 | 3 | Check VM and `/data` | `ansible intel-a163f8 -a 'qm status 200'`, `ssh media@192.168.8.200 'df -h /data; ls /data/*'` |
 | 4 | Create the 1Password item `media-stack` with generated API keys / password (only missing fields) | `ansible-playbook playbooks/secrets-init.yml` |
 | 5 | Sync `stack/`, render `secrets.env`, `docker compose up` | `ansible-playbook playbooks/media-stack.yml` |
-| 6 | qBittorrent password, save path, categories `movies tv anime music`; Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
-| 7 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music`; download client qBittorrent (`qbittorrent:8080`, user `admin`) in Sonarr (category `tv`), Radarr (`movies`), Lidarr (`music`) | `ansible-playbook playbooks/arr-config.yml` |
+| 6 | qBittorrent passwords, save path, queue limits (10 downloads / 10 uploads / 15 active), categories `movies tv anime music` (`qbittorrent`) and `music` (`qbittorrent-lidarr`); Prowlarr app sync to Sonarr/Radarr/Lidarr + download client | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
+| 7 | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music`; download client qBittorrent (`qbittorrent:8080`, user `admin`) in Sonarr (category `tv`) and Radarr (`movies`); `qBittorrent (Lidarr)` (`qbittorrent-lidarr:8081`) in Lidarr (`music`) | `ansible-playbook playbooks/arr-config.yml` |
 | 8 | Jellyfin first-run wizard (below) | browser |
 | 9 | Add indexers in Prowlarr (manual, below) | browser |
 
@@ -156,7 +158,8 @@ Credentials live in 1Password item **`media-stack`** in vault **Lab** (`xmjfgnso
 | `lidarr_api_key` | Lidarr API, Prowlarr app sync |
 | `prowlarr_api_key` | Prowlarr API |
 | `aurral_api_key` | Aurral admin API key (`AURRAL_API_KEY`, 64 hex) |
-| `qbittorrent_password` | qBittorrent web UI (user `admin`), *arr download client |
+| `qbittorrent_password` | qBittorrent web UI (user `admin`), Radarr/Sonarr/Prowlarr download client |
+| `qbittorrent_lidarr_password` | qBittorrent (Lidarr) web UI on :8081 (user `admin`), Lidarr download client |
 
 Read one value (prints it, so only in your own terminal):
 
@@ -290,7 +293,7 @@ the kernel changed (containers come back by their restart policy).
 | `/data` slow or I/O errors | Ceph health: `ansible-playbook playbooks/ceph.yml --tags status` (expect `HEALTH_OK`, 4 OSDs up/in) |
 | VM won't start | `ansible intel-a163f8 -a 'qm status 200'`, then `ansible intel-a163f8 -a 'qm start 200'`; Ceph must have quorum (3 MONs) |
 | Node drops off the network, loses quorum, everything on it goes down | Look for `e1000e ... Detected Hardware Unit Hang` in the previous boot: `ansible <node> -m shell -a 'journalctl -k -b -1 \| grep -c "Hardware Unit Hang"'` (intel-a163f8 logged 238 on 2026-11-21). Fix: TSO/GSO off, `ansible-playbook playbooks/pve-nic.yml` (add the NIC to `pve_nic_offload_off` in `inventory/hosts.yml`); check with `ethtool -k <nic> \| grep segmentation` |
-| Playbook run reports `changed` on a working host | Do not "fix" the host: run with `--check --diff`, read the diff, fix the role |
+\| Playbook run reports `changed` on a working host | Do not "fix" the host: run with `--check --diff`, read the diff, fix the role |
 
 **osd.1 pending sectors.** osd.1 (Seagate 4TB HDD on intel-177e78, serial `W8002A8K`) had 48 pending
 sectors when it was added. Check it regularly; a rising count means replace the disk before it fails:

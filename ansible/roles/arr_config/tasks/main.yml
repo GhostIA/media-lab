@@ -1,6 +1,6 @@
 ---
 # One 1Password read per run: the whole item (onepassword_raw), keeping only the "<app>_api_key"
-# fields of the configured apps and qbittorrent_password (download client login). `op` can time out transiently ("authorization timeout"), hence until.
+# fields of the configured apps and every download client password_field. `op` can time out transiently ("authorization timeout"), hence until.
 - name: Read the *arr API keys and the qBittorrent password from 1Password (one item read)
   ansible.builtin.set_fact:
     arr_config_api_keys: >-
@@ -8,7 +8,9 @@
           | default({}, true)).fields | default([])
          | selectattr('label', 'defined')
          | selectattr('label', 'in', arr_config_apps | map(attribute='app') | map('regex_replace', '$', '_api_key')
-                                    | list + ['qbittorrent_password'])
+                                    | list + [arr_config_download_client.password_field]
+                                    + (arr_config_apps | map(attribute='download_client.client.password_field', default='')
+                                       | select | list))
          | items2dict(key_name='label', value_name='value') }}
     arr_config_failed: []
     arr_config_skipped: []

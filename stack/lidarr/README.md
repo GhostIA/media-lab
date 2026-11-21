@@ -26,13 +26,13 @@ comes from 1Password (`op://<vault>/media-stack/lidarr_api_key`).
 
 ## Download client (qBittorrent)
 
-Settings > Download Clients > + > qBittorrent:
+Managed by `ansible-playbook playbooks/arr-config.yml` (entry `qBittorrent (Lidarr)`, priority 1); the values, for reference:
 
 | Field | Value |
 |---|---|
-| Host | `qbittorrent` (compose service name on the shared default network) |
-| Port | `8080` |
-| Username / Password | qBittorrent WebUI login (from 1Password) |
+| Host | `qbittorrent-lidarr` (Lidarr's own instance, compose service name on the shared network) |
+| Port | `8081` |
+| Username / Password | `admin` / `qbittorrent_lidarr_password` (1Password) |
 | Category | `music` (qBittorrent saves it to `/data/torrents/music`) |
 
 Because torrents (`/data/torrents/music`) and the library (`/data/media/music`) are on the same

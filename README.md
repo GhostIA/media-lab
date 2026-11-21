@@ -14,7 +14,8 @@ losing data), and one VM on top runs the media apps in Docker:
 | **Prowlarr** | Manages indexers for all three of the above | <http://192.168.8.200:9696> |
 | **Seerr** | Request page: users sign in with Jellyfin and ask for movies/shows; Radarr/Sonarr fetch them | <http://192.168.8.200:5055> |
 | **Cleanuparr** | Cleans the download queue: stalled, failed-import, malware and finished/orphaned downloads | <http://192.168.8.200:11011> |
-| **qBittorrent** | Download client | <http://192.168.8.200:8080> |
+| **qBittorrent** | Download client for Radarr and Sonarr | <http://192.168.8.200:8080> |
+| **qBittorrent (Lidarr)** | Download client for Lidarr only | <http://192.168.8.200:8081> |
 
 Everything is built and kept in shape with **Ansible** (`ansible/`) and **Terraform** (`terraform/`, the VM
 itself). No secrets live in this repo: they're all in 1Password and fetched at run time.
@@ -55,6 +56,7 @@ And the apps, from anywhere on the LAN:
 for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status 11011/health; do
   printf '%-12s ' $p; curl -fsS -m 5 http://192.168.8.200:$p; echo; done
 curl -s -o /dev/null -w 'qbittorrent  %{http_code}\n' http://192.168.8.200:8080/   # 200
+curl -s -o /dev/null -w 'qbt-lidarr   %{http_code}\n' http://192.168.8.200:8081/   # 200
 ```
 
 ### 3. Log in to the apps
@@ -63,6 +65,7 @@ curl -s -o /dev/null -w 'qbittorrent  %{http_code}\n' http://192.168.8.200:8080/
   outside the LAN.
 - **qBittorrent:** user `admin`; password:
   `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/qbittorrent_password`
+  (the Lidarr instance on :8081 uses `qbittorrent_lidarr_password`)
 - **Jellyfin:** the first visit runs a setup wizard. Create your admin user (save it in 1Password),
   then add the libraries: Movies `/data/media/movies`, Shows `/data/media/tv`,
   Anime `/data/media/anime` (type: Shows), Music `/data/media/music`.
@@ -91,7 +94,7 @@ setup a healthy run reports `changed=0`.
 | Run a command on a node | `ansible intel-a163f8 -a 'qm status 200'` (or `pve_nodes` for all five) |
 | Check the cluster's readiness | `ansible-playbook playbooks/inventory-report.yml` (read-only) |
 | Change the VM (CPU, RAM, disks) | Edit `terraform/variables.tf`, then `cd terraform && op run --env-file .env.op -- terraform plan`. Read the plan before `apply` |
-| Get a secret | `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<field>` (fields: `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`) |
+| Get a secret | `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<field>` (fields: `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`, `qbittorrent_lidarr_password`) |
 
 ## Where the files are
 

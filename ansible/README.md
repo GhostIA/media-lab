@@ -61,8 +61,8 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 | `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, data disk (formatted **only if blank and confirmed** with `-e confirm_format=<disk>`), `/data` fstab mount, `/data` tree, `/opt/media-stack` | `vm-media-stack.sh bootstrap` |
 | `playbooks/secrets-init.yml` | `localhost` | | Creates 1Password item `media-stack` / adds missing fields only; never overwrites | `stack/secrets-init.sh` |
 | `playbooks/media-stack.yml` | `media_vms` | | Syncs `stack/` to `/opt/media-stack/stack`, renders `<svc>/secrets.env` (0600) from 1Password, `docker compose up` (never `down`) | `stack/deploy.sh` |
-| `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing); download client qBittorrent (`qbittorrent:8080`, user `admin`) with category Sonarr `tv`, Radarr `movies`, Lidarr `music` (adds, or fixes it when settings differ or its test fails) | `stack/{sonarr,radarr,lidarr}/configure.sh`, manual download-client setup |
-| `playbooks/qbt-prowlarr-config.yml` | `localhost` → app APIs | | qBittorrent password, prefs/save path, categories `movies tv anime music`; Prowlarr apps (Sonarr, Radarr, Lidarr) + qBittorrent download client | `stack/{qbittorrent,prowlarr}/configure.sh` |
+| `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing); download client qBittorrent (`qbittorrent:8080`, user `admin`) with category Sonarr `tv`, Radarr `movies`; Lidarr gets its own `qBittorrent (Lidarr)` (`qbittorrent-lidarr:8081`, `music`) (adds, or fixes it when settings differ or its test fails) | `stack/{sonarr,radarr,lidarr}/configure.sh`, manual download-client setup |
+| `playbooks/qbt-prowlarr-config.yml` | `localhost` → app APIs | | For each qBittorrent instance (`qbittorrent`, `qbittorrent-lidarr`): password, prefs/save path, queue limits, categories (`movies tv anime music` / `music`); Prowlarr apps (Sonarr, Radarr, Lidarr) + qBittorrent download client | `stack/{qbittorrent,prowlarr}/configure.sh` |
 
 Usage pattern, every playbook:
 
@@ -134,6 +134,6 @@ resolved values only land on the target (mode 0600). Nothing secret is committed
 
 | 1Password item | Holds | Used by |
 |---|---|---|
-| `media-stack` | `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password` | `secrets-init.yml` (creates), `media-stack.yml`, `arr-config.yml`, `qbt-prowlarr-config.yml` |
+| `media-stack` | `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`, `qbittorrent_lidarr_password` | `secrets-init.yml` (creates), `media-stack.yml`, `arr-config.yml`, `qbt-prowlarr-config.yml` |
 | `pve-terraform` | token secret of `terraform@pve!media` | `pve-terraform-token.yml` (creates), `terraform/.env.op` |
 | one item per node (IDs were in `pve-tools/nodes.txt`) | root password | password fallback only (e.g. before `ssh-keys.yml` has run) |

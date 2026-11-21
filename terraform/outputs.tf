@@ -18,6 +18,11 @@ output "vm_mac" {
   value       = proxmox_virtual_environment_vm.media_stack.network_device[0].mac_address
 }
 
+output "ha_resource" {
+  description = "HA resource ID of the VM (`ha-manager status` shows where it runs)."
+  value       = proxmox_haresource.media_stack.resource_id
+}
+
 output "image_file_id" {
   description = "Volume ID of the Debian 13 cloud image."
   value       = proxmox_download_file.debian13.id

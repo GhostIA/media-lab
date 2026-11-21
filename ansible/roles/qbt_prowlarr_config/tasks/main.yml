@@ -8,15 +8,31 @@
   no_log: true
   tags: [always]
 
-- name: Check that the qBittorrent password is in 1Password
+- name: Check that every qBittorrent password is in 1Password
   ansible.builtin.assert:
-    that: qbt_prowlarr_config_secrets.qbittorrent_password | default('') | length > 0
-    fail_msg: "1Password item {{ qbt_prowlarr_config_op_item }} has no value for qbittorrent_password"
+    that: qbt_prowlarr_config_secrets[item.password_field] | default('') | length > 0
+    fail_msg: "1Password item {{ qbt_prowlarr_config_op_item }} has no value for {{ item.password_field }}"
     quiet: true
+  loop: "{{ qbt_prowlarr_config_qbt_instances }}"
+  loop_control:
+    label: "{{ item.container }}"
   tags: [always]
 
-- name: Configure qBittorrent
-  ansible.builtin.import_tasks: qbittorrent.yml
+- name: Configure each qBittorrent instance
+  ansible.builtin.include_tasks:
+    file: qbittorrent.yml
+    apply:
+      tags: [qbittorrent]
+  loop: "{{ qbt_prowlarr_config_qbt_instances }}"
+  loop_control:
+    loop_var: qbt_prowlarr_config_qbt
+    label: "{{ qbt_prowlarr_config_qbt.container }}"
+  vars:
+    qbt_prowlarr_config_qbt_url: "http://{{ media_vm.ip }}:{{ qbt_prowlarr_config_qbt.port }}"
+    qbt_prowlarr_config_qbt_container: "{{ qbt_prowlarr_config_qbt.container }}"
+    qbt_prowlarr_config_qbt_password: "{{ qbt_prowlarr_config_secrets[qbt_prowlarr_config_qbt.password_field] }}"
+    qbt_prowlarr_config_qbt_password_field: "{{ qbt_prowlarr_config_qbt.password_field }}"
+    qbt_prowlarr_config_qbt_categories: "{{ qbt_prowlarr_config_qbt.categories }}"
   tags: [qbittorrent]
 
 - name: Configure Prowlarr

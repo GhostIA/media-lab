@@ -141,13 +141,22 @@ network; plan downtime for it.
 ## 5. State
 
 State is local (`terraform/terraform.tfstate`, gitignored). It holds no secrets (the API token is
-only in the environment), but losing it means re-importing. After every apply:
+only in the environment), but losing it means re-importing. The backup copy is the 1Password
+document **`media-lab-tfstate`** in vault Lab (`xmjfgnsondcvlqa6bovelwdztm`), first uploaded
+2026-11-21 (before that the only copy sat in an agent worktree under `.claude/worktrees/`).
+
+After **every** `terraform apply` (from `terraform/`), re-upload it and check the copy:
 
 ```sh
-cp terraform.tfstate ~/Backups/media-lab/terraform.tfstate.$(date +%Y%m%d-%H%M%S)
-# or keep it in 1Password as a document:
-op document create terraform.tfstate --vault Lab --title media-lab-tfstate   # first time
-op document edit media-lab-tfstate terraform.tfstate --vault Lab             # afterwards
+op document edit media-lab-tfstate terraform.tfstate --vault xmjfgnsondcvlqa6bovelwdztm
+op document get media-lab-tfstate --vault xmjfgnsondcvlqa6bovelwdztm --out-file /tmp/s && cmp terraform.tfstate /tmp/s && rm /tmp/s
+```
+
+Restore on a new checkout (or after the file is lost), from the repo root, before any plan/apply:
+
+```sh
+op document get media-lab-tfstate --vault xmjfgnsondcvlqa6bovelwdztm --out-file terraform/terraform.tfstate
+chmod 600 terraform/terraform.tfstate
 ```
 
 If the state is lost: `terraform init`, then repeat §3 (the `import {}` blocks are still in

@@ -125,27 +125,3 @@
         dump: "0"
         passno: "2"
         state: mounted
-
-# nofail keeps the VM reachable over SSH without the data disk, but containers must never start
-# against the empty mountpoint on the OS disk: docker requires the mount.
-- name: Create the docker.service drop-in directory
-  ansible.builtin.file:
-    path: /etc/systemd/system/docker.service.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-- name: Make docker.service require the data mount
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/docker.service.d/require-data.conf
-    content: |
-      [Unit]
-      RequiresMountsFor={{ media_host_data_root }}
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Reload systemd
-
-- name: Apply systemd changes before docker is installed or started
-  ansible.builtin.meta: flush_handlers

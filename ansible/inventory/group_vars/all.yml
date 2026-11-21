@@ -8,6 +8,8 @@ pve_api_host: 192.168.8.234
 ceph_release: tentacle
 ceph_pool: media-ec
 media_vm: {vmid: 200, name: media-stack, node: intel-a163f8, ip: 192.168.8.200}
+# VM 201: the apps that do not need the local /data disk; mounts /data over NFS from media_vm
+media_apps_vm: {vmid: 201, name: media-apps, node: intel-d1babf, ip: 192.168.8.201}
 media_data_root: /data
 media_config_root: /opt/media-stack/config
 media_stack_root: /opt/media-stack/stack

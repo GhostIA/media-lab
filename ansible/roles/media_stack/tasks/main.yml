@@ -23,10 +23,32 @@
       {{ ['compose.yaml']
          + (media_stack_tree | selectattr('state', 'eq', 'file') | map(attribute='path')
             | select('match', '^[^/]+/compose\.yaml$') | sort) }}
-    media_stack_secret_services: >-
+    media_stack_all_secret_services: >-
       {{ media_stack_tree | selectattr('state', 'eq', 'file') | map(attribute='path')
          | select('match', '^[^/]+/secrets\.env\.tpl$')
          | map('regex_replace', '/secrets\.env\.tpl$', '') | sort }}
+
+# This host's services (media_stack_host_services, or all of them), and the subset brought up in
+# this run (media_stack_services narrows it). Config dirs and secrets follow the host's services.
+- name: Select this host's services
+  ansible.builtin.set_fact:
+    media_stack_my_services: "{{ media_stack_my }}"
+    media_stack_up_services: >-
+      {{ (media_stack_services | select('in', media_stack_my) | list) if media_stack_services | length > 0
+         else media_stack_my }}
+    media_stack_secret_services: "{{ media_stack_all_secret_services | select('in', media_stack_my) | list }}"
+  vars:
+    media_stack_all_services: "{{ media_stack_compose_files | reject('eq', 'compose.yaml') | map('dirname') | list }}"
+    media_stack_my: >-
+      {{ media_stack_host_services if media_stack_host_services | length > 0 else media_stack_all_services }}
+
+- name: Check this host's services all have a Compose file
+  ansible.builtin.assert:
+    that: media_stack_my_services | difference(media_stack_compose_files | map('dirname')) | length == 0
+    fail_msg: >-
+      media_stack_host_services lists services without stack/<svc>/compose.yaml:
+      {{ media_stack_my_services | difference(media_stack_compose_files | map('dirname')) }}
+    quiet: true
 
 - name: Ensure the stack root exists (setgid, group-writable like /opt/media-stack)
   ansible.builtin.file:
@@ -42,11 +64,11 @@
 # manage their own), and a fixed mode would change them on every host; new dirs get the umask default.
 - name: Ensure each service's config directory exists, owned by PUID:PGID  # noqa: risky-file-permissions
   ansible.builtin.file:
-    path: "{{ media_stack_config_root }}/{{ item | dirname }}"
+    path: "{{ media_stack_config_root }}/{{ item }}"
     state: directory
     owner: "{{ media_puid }}"
     group: "{{ media_pgid }}"
-  loop: "{{ media_stack_compose_files | reject('eq', 'compose.yaml') | list }}"
+  loop: "{{ media_stack_my_services }}"
 
 - name: Ensure the stack directories exist
   ansible.builtin.file:
@@ -178,14 +200,15 @@
       {{ media_stack_compose_stat.results | selectattr('stat', 'defined') | selectattr('stat.exists')
          | map(attribute='item') | list if ansible_check_mode else media_stack_compose_files }}
     media_stack_services_present: >-
-      {{ media_stack_services | select('in', media_stack_compose_present | map('dirname') | list) | list }}
+      {{ media_stack_up_services | select('in', media_stack_compose_present | map('dirname') | list) | list }}
   community.docker.docker_compose_v2:
     project_src: "{{ media_stack_root }}"
     files: "{{ media_stack_compose_present }}"
     env_files: [.env]
-    services: "{{ media_stack_services_present | default(omit, true) }}"
+    # always an explicit list: an empty `services` would start every service of the project
+    services: "{{ media_stack_services_present }}"
     state: present
     recreate: auto
     remove_orphans: false
-  # check mode with only not-yet-copied services selected: nothing for Compose to evaluate
-  when: media_stack_services | length == 0 or media_stack_services_present | length > 0
+  # nothing of this host selected (or, in check mode, not copied yet): leave Compose alone
+  when: media_stack_services_present | length > 0

@@ -8,6 +8,19 @@ media_host_stack_root: "{{ media_stack_root | default('/opt/media-stack/stack') 
 media_host_puid: "{{ media_puid | default(1000) }}"
 media_host_pgid: "{{ media_pgid | default(1000) }}"
 media_host_categories: "{{ media_categories | default(['movies', 'tv', 'anime', 'music']) }}"
+# Extra /data/media/<dir> folders that are not download categories (no /data/torrents twin):
+# aurral = Aurral's Library folder (LIBRARY_FOLDER in stack/aurral/compose.yaml).
+media_host_media_dirs: [aurral]
+
+# Where /data comes from: `disk` = this VM's own data disk (below), `nfs` = mounted from
+# media_host_nfs_server (set per host in the inventory).
+media_host_data_source: disk
+# disk hosts: client IPs allowed to mount /data over NFS (empty = no NFS server installed)
+media_host_nfs_clients: []
+media_host_nfs_export_opts: rw,sync,no_subtree_check,root_squash
+# nfs hosts: the VM that has the data disk, and the mount options
+media_host_nfs_server: "{{ media_vm.ip | default('') }}"
+media_host_nfs_mount_opts: nfsvers=4.2,hard,noatime,_netdev,nofail,x-systemd.mount-timeout=30s
 
 # PVE scsi1 = the 3T data disk on media-ec. The by-id name is fixed by QEMU (drive-scsi1), so it
 # cannot be confused with the OS disk (drive-scsi0) the way /dev/sdX can.

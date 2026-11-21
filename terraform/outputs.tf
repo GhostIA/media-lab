@@ -23,6 +23,16 @@ output "ha_resource" {
   value       = proxmox_haresource.media_stack.resource_id
 }
 
+output "apps_vm_ipv4" {
+  description = "Static IPv4 address of VM 201 (media-apps)."
+  value       = split("/", var.apps_ipv4_cidr)[0]
+}
+
+output "apps_vm_node" {
+  description = "Node VM 201 was created on."
+  value       = proxmox_virtual_environment_vm.media_apps.node_name
+}
+
 output "image_file_id" {
   description = "Volume ID of the Debian 13 cloud image."
   value       = proxmox_download_file.debian13.id

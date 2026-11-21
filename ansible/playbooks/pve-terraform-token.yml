@@ -1,5 +1,5 @@
 ---
-# PVE API user + token for Terraform (terraform/ manages VM 200).
+# PVE API user + token for Terraform (terraform/ manages VM 200 and VM 201).
 #
 # usage (from ansible/):
 #   ansible-playbook playbooks/pve-terraform-token.yml --check --diff
@@ -60,6 +60,9 @@
       - {path: /storage/local, roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
       - {path: /sdn/zones/localnetwork, roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
       - {path: "/nodes/{{ media_vm.node }}", roleid: TerraformNode, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      # VM 201 (media-apps): its VMID, and its node for the cloud-image download
+      - {path: "/vms/{{ media_apps_vm.vmid }}", roleid: TerraformVM, propagate: 1, type: user, ugid: "{{ tf_user }}"}
+      - {path: "/nodes/{{ media_apps_vm.node }}", roleid: TerraformNode, propagate: 1, type: user, ugid: "{{ tf_user }}"}
   tasks:
     - name: Run on the API node only ({{ pve_api_node }})
       ansible.builtin.meta: end_host

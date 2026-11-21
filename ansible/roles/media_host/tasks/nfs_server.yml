@@ -1,0 +1,41 @@
+---
+# Export /data to the VMs listed in media_host_nfs_clients (only on the VM with the data disk).
+# root_squash (the default) stays on: every app runs as PUID:PGID, which is the same uid/gid on
+# both VMs, so no client ever needs root on the share.
+- name: Install the NFS server
+  ansible.builtin.apt:
+    name: nfs-kernel-server
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# exportfs reads /etc/exports.d/*.exports, but Debian does not create the directory
+- name: Create /etc/exports.d
+  ansible.builtin.file:
+    path: /etc/exports.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Export /data to the NFS clients
+  ansible.builtin.copy:
+    dest: /etc/exports.d/media-data.exports
+    content: |
+      # managed by ansible (media_host role, nfs_server.yml)
+      {{ media_host_data_root }} {% for c in media_host_nfs_clients %}{{ c }}({{ media_host_nfs_export_opts }}){{ ' ' if not loop.last else '' }}{% endfor %}
+
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload NFS exports
+
+- name: Enable and start the NFS server
+  ansible.builtin.systemd_service:
+    name: nfs-server
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Apply the export before any client mounts it
+  ansible.builtin.meta: flush_handlers

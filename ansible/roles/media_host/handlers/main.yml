@@ -4,3 +4,8 @@
 - name: Reload systemd
   ansible.builtin.systemd_service:
     daemon_reload: true
+
+# Re-reads /etc/exports(.d) without restarting nfs-server; mounted clients are not interrupted.
+- name: Reload NFS exports
+  ansible.builtin.command: exportfs -ra
+  changed_when: true

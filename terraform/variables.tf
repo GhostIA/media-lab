@@ -133,3 +133,47 @@ variable "ha_node_priorities" {
     "intel-177e78" = 1
   }
 }
+
+# --- VM 201 "media-apps" (vm201.tf) ---
+
+variable "apps_node_name" {
+  description = "PVE node that creates VM 201 and holds its copy of the cloud image."
+  type        = string
+  default     = "intel-d1babf"
+}
+
+variable "apps_vm_id" {
+  description = "VMID of the media apps VM."
+  type        = number
+  default     = 201
+}
+
+variable "apps_vm_name" {
+  description = "Name (and cloud-init hostname) of VM 201."
+  type        = string
+  default     = "media-apps"
+}
+
+variable "apps_cpu_cores" {
+  description = "vCPUs of VM 201."
+  type        = number
+  default     = 4
+}
+
+variable "apps_memory_mb" {
+  description = "Dedicated memory of VM 201 in MiB (no ballooning)."
+  type        = number
+  default     = 3072
+}
+
+variable "apps_mac_address" {
+  description = "MAC of VM 201's net0 (pinned)."
+  type        = string
+  default     = "BC:24:11:05:1F:81"
+}
+
+variable "apps_ipv4_cidr" {
+  description = "Static IPv4 address of VM 201 in CIDR notation."
+  type        = string
+  default     = "192.168.8.201/24"
+}

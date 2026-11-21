@@ -43,7 +43,9 @@ To log in by hand before that, read the temporary password with
 
 - Default save path `/data/torrents`, no separate incomplete-downloads folder.
 - Queue: 10 active downloads, 10 active uploads, 15 active torrents in total (qBittorrent's defaults
-  are 3 / 3 / 5). Set in `qbt_prowlarr_config_qbt_prefs`, applied to both instances.
+  are 3 / 3 / 5). Slow torrents (under 2 KiB/s for 60 s: stalled, or magnets still fetching
+  metadata) do not count towards these limits. Set in `qbt_prowlarr_config_qbt_prefs`, applied to
+  both instances.
 - Automatic Torrent Management is the default mode (torrents are placed by category), and torrents
   are relocated when their category or the category path changes.
 - Categories, each with save path `/data/torrents/<category>`:

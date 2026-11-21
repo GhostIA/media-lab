@@ -37,6 +37,10 @@ qbt_prowlarr_config_qbt_prefs:
   slow_torrent_dl_rate_threshold: 2
   slow_torrent_ul_rate_threshold: 2
   slow_torrent_inactive_timer: 60
+  # Global download limit per instance, bytes/s (8 MiB/s). Unlimited downloads on the media VM
+  # saturated the Ceph EC pool (HDD OSDs: BLUESTORE_SLOW_OP_ALERT, 98% I/O pressure on VM 200).
+  # Both instances together can still reach 16 MiB/s; lower this if Ceph warns again.
+  dl_limit: 8388608
 # container whose `docker logs` carry the temporary password on a fresh install
 qbt_prowlarr_config_qbt_container: qbittorrent
 

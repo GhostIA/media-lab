@@ -46,6 +46,8 @@ To log in by hand before that, read the temporary password with
   are 3 / 3 / 5). Slow torrents (under 2 KiB/s for 60 s: stalled, or magnets still fetching
   metadata) do not count towards these limits. Set in `qbt_prowlarr_config_qbt_prefs`, applied to
   both instances.
+- Download limit 8 MiB/s per instance (`dl_limit`), so torrents cannot saturate the Ceph pool the
+  VM disks live on. Both instances together can reach 16 MiB/s.
 - Automatic Torrent Management is the default mode (torrents are placed by category), and torrents
   are relocated when their category or the category path changes.
 - Categories, each with save path `/data/torrents/<category>`:

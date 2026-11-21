@@ -1,7 +1,7 @@
 # Runbook: *arr media stack
 
 Operator guide for the media stack on the `media` Proxmox cluster: Jellyfin, Sonarr (TV + anime),
-Radarr, Lidarr, Prowlarr and qBittorrent in one Docker Compose project on VM 200.
+Radarr, Lidarr, Aurral, Prowlarr and qBittorrent in one Docker Compose project on VM 200.
 How it was built: [arr-batch-kickstart.md](arr-batch-kickstart.md), then moved to Ansible + Terraform
 ([iac-batch-kickstart.md](iac-batch-kickstart.md)). Repo rules: [CLAUDE.md](../CLAUDE.md).
 Playbook reference (prerequisites, inventory, every playbook and tag): [ansible/README.md](../ansible/README.md).
@@ -22,6 +22,7 @@ VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.
      ├─ sonarr       :8989   TV + anime               /data  (torrents -> media, hardlinks)
      ├─ radarr       :7878   movies                   /data
      ├─ lidarr       :8686   music                    /data
+     ├─ aurral       :3001   music discovery/requests  /data  (Lidarr plugin, library /data/media/aurral)
      ├─ prowlarr     :9696   indexers -> app sync to sonarr/radarr/lidarr
      ├─ cleanuparr   :11011  queue cleanup: stalled/failed/malware/orphaned downloads (qbittorrent + *arrs)
      ├─ flaresolverr (8191, internal only)  Cloudflare solver, Prowlarr indexer proxy (tag flaresolverr)
@@ -72,6 +73,7 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 | Sonarr | http://192.168.8.200:8989 | `curl -fsS http://192.168.8.200:8989/ping` | `{"status":"OK"}` |
 | Radarr | http://192.168.8.200:7878 | `curl -fsS http://192.168.8.200:7878/ping` | `{"status":"OK"}` |
 | Lidarr | http://192.168.8.200:8686 | `curl -fsS http://192.168.8.200:8686/ping` | `{"status":"OK"}` |
+| Aurral | http://192.168.8.200:3001 | `curl -fsS http://192.168.8.200:3001/api/health/live` | `{"status":"ok"}` |
 | Prowlarr | http://192.168.8.200:9696 | `curl -fsS http://192.168.8.200:9696/ping` | `{"status":"OK"}` |
 | Seerr | http://192.168.8.200:5055 | `curl -fsS http://192.168.8.200:5055/api/v1/status` | JSON with `"version"` |
 | Cleanuparr | http://192.168.8.200:11011 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:11011/health` | `200` |
@@ -153,6 +155,7 @@ Credentials live in 1Password item **`media-stack`** in vault **Lab** (`xmjfgnso
 | `radarr_api_key` | Radarr API, Prowlarr app sync |
 | `lidarr_api_key` | Lidarr API, Prowlarr app sync |
 | `prowlarr_api_key` | Prowlarr API |
+| `aurral_api_key` | Aurral admin API key (`AURRAL_API_KEY`, 64 hex) |
 | `qbittorrent_password` | qBittorrent web UI (user `admin`), *arr download client |
 
 Read one value (prints it, so only in your own terminal):
@@ -172,6 +175,7 @@ curl -fsS -H "X-Api-Key: $(op read 'op://xmjfgnsondcvlqa6bovelwdztm/media-stack/
 |---|---|
 | Jellyfin | Admin user from the wizard (section 4) |
 | Sonarr / Radarr / Lidarr / Prowlarr | No prompt from the LAN; API key in the field above |
+| Aurral | Create the admin account in the browser on first start; Lidarr plugin setup in [stack/aurral/README.md](../stack/aurral/README.md) |
 | qBittorrent | User `admin`, password `qbittorrent_password` (set by `playbooks/qbt-prowlarr-config.yml`) |
 
 ## 6. Sonarr: TV vs anime

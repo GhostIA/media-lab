@@ -1,0 +1,36 @@
+# Aurral 3 (music discovery, requests and player; hands album requests to Lidarr via its plugin).
+# Merged into the media-stack project by playbooks/media-stack.yml (-f per service file), so relative paths
+# resolve against stack/: hence aurral/secrets.env. Host paths come only from the shared .env.
+services:
+  aurral:
+    image: ghcr.io/lklynet/aurral:3.0.1
+    container_name: aurral
+    restart: unless-stopped
+    environment:
+      # The entrypoint starts as root, chowns /config, then drops to PUID:PGID (setpriv).
+      # It has no UMASK support: new files are 644/755, readable by Jellyfin, not group-writable.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-America/Chicago}
+      # First Library folder (Aurral's own downloads). Inside /data, so Jellyfin sees the same path.
+      # After the first start, Settings > Library is authoritative.
+      LIBRARY_FOLDER: /data/media/aurral
+    # AURRAL_API_KEY (admin API key, >= 32 chars or Aurral refuses to start), rendered from
+    # secrets.env.tpl by playbooks/media-stack.yml (op inject). Optional: without it Aurral generates its own.
+    env_file:
+      - path: aurral/secrets.env
+        required: false
+    ports:
+      - "3001:3001"
+    volumes:
+      - ${CONFIG_ROOT:?CONFIG_ROOT not set}/aurral:/config
+      # whole /data: Library folder in /data/media/aurral, Lidarr's /data/media/music as a
+      # read-only folder (set in the UI), qBittorrent downloads under /data/torrents
+      - ${DATA_ROOT:?DATA_ROOT not set}:/data
+    healthcheck:
+      # no curl in the image (node:trixie-slim); /api/health/live is unauthenticated
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

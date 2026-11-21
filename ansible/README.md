@@ -133,6 +133,6 @@ resolved values only land on the target (mode 0600). Nothing secret is committed
 
 | 1Password item | Holds | Used by |
 |---|---|---|
-| `media-stack` | `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `qbittorrent_password` | `secrets-init.yml` (creates), `media-stack.yml`, `arr-config.yml`, `qbt-prowlarr-config.yml` |
+| `media-stack` | `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password` | `secrets-init.yml` (creates), `media-stack.yml`, `arr-config.yml`, `qbt-prowlarr-config.yml` |
 | `pve-terraform` | token secret of `terraform@pve!media` | `pve-terraform-token.yml` (creates), `terraform/.env.op` |
 | one item per node (IDs were in `pve-tools/nodes.txt`) | root password | password fallback only (e.g. before `ssh-keys.yml` has run) |

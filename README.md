@@ -10,6 +10,7 @@ losing data), and one VM on top runs the media apps in Docker:
 | **Sonarr** | Finds and organises TV shows and anime | <http://192.168.8.200:8989> |
 | **Radarr** | Same for movies | <http://192.168.8.200:7878> |
 | **Lidarr** | Same for music | <http://192.168.8.200:8686> |
+| **Aurral** | Discover, request and play music; hands album requests to Lidarr | <http://192.168.8.200:3001> |
 | **Prowlarr** | Manages indexers for all three of the above | <http://192.168.8.200:9696> |
 | **Seerr** | Request page: users sign in with Jellyfin and ask for movies/shows; Radarr/Sonarr fetch them | <http://192.168.8.200:5055> |
 | **Cleanuparr** | Cleans the download queue: stalled, failed-import, malware and finished/orphaned downloads | <http://192.168.8.200:11011> |
@@ -90,7 +91,7 @@ setup a healthy run reports `changed=0`.
 | Run a command on a node | `ansible intel-a163f8 -a 'qm status 200'` (or `pve_nodes` for all five) |
 | Check the cluster's readiness | `ansible-playbook playbooks/inventory-report.yml` (read-only) |
 | Change the VM (CPU, RAM, disks) | Edit `terraform/variables.tf`, then `cd terraform && op run --env-file .env.op -- terraform plan`. Read the plan before `apply` |
-| Get a secret | `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<field>` (fields: `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `qbittorrent_password`) |
+| Get a secret | `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<field>` (fields: `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`) |
 
 ## Where the files are
 

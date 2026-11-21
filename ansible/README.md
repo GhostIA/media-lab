@@ -52,6 +52,7 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 |---|---|---|---|---|
 | `playbooks/ssh-keys.yml` | `pve_nodes` (run_once) | | Adds `~/.ssh/id_ed25519.pub` to root's `/etc/pve/priv/authorized_keys` (cluster-wide file); password login stays as fallback | `pvessh.sh` / `askpass.sh` password login |
 | `playbooks/pve-repos.yml` | `pve_nodes` | | No-subscription deb822 repos (PVE + Ceph tentacle), enterprise repos disabled, apt cache | `fix-repos.sh` |
+| `playbooks/pve-nic.yml` | `pve_nodes` (hosts with `pve_nic_offload_off`) | | TSO/GSO off on the listed e1000e NICs (intel-a163f8, intel-91c45d: `eno1`): `ethtool -K` now, `post-up` line in `/etc/network/interfaces` for boot. No network restart. Workaround for "e1000e Detected Hardware Unit Hang" (2026-11-21: 238 hangs on intel-a163f8, node lost quorum) | (new) |
 | `playbooks/inventory-report.yml` | `pve_nodes` | | Nothing (read-only readiness report) | `inventory.sh` |
 | `playbooks/pve-cluster.yml` | `pve_nodes` | | Joins a node to cluster `media` via the PVE API; skipped when the node is already clustered | `join.sh` |
 | `playbooks/ceph.yml` | `pve_nodes` / `ceph_mons` / `ceph_osds` | `install`, `init`, `mons`, `pool`, `status` (all run by default); `osds` (tagged `never`) | Ceph packages, `ceph.conf`, MON/MGR, EC 2+1 pool + PVE storage `media-ec`; `status` is read-only. `osds` zaps and creates OSDs: **destructive**, needs `--tags osds -e confirm_destroy=<serial>` | `ceph-setup.sh` |
@@ -93,7 +94,7 @@ op run --env-file .env.op -- terraform apply
 | # | Step | Command (from `ansible/` unless noted) |
 |---|---|---|
 | 1 | Root SSH key on the nodes | `ansible-playbook playbooks/ssh-keys.yml` |
-| 2 | Repos, then readiness report | `ansible-playbook playbooks/pve-repos.yml`, `ansible-playbook playbooks/inventory-report.yml` |
+| 2 | Repos, NIC offload workaround, then readiness report | `ansible-playbook playbooks/pve-repos.yml`, `ansible-playbook playbooks/pve-nic.yml`, `ansible-playbook playbooks/inventory-report.yml` |
 | 3 | Cluster join | `ansible-playbook playbooks/pve-cluster.yml` |
 | 4 | Ceph install, config, MON/MGR | `ansible-playbook playbooks/ceph.yml --tags install,init,mons` |
 | 5 | OSDs (destructive, per disk) | `ansible-playbook playbooks/ceph.yml --tags osds -l <node> -e confirm_destroy=<serial>` |

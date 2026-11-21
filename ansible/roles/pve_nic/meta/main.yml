@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: Turn off TSO/GSO on e1000e NICs (Intel I219 "Detected Hardware Unit Hang"), now and at boot
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

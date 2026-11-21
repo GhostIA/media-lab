@@ -8,6 +8,9 @@ media_host_stack_root: "{{ media_stack_root | default('/opt/media-stack/stack') 
 media_host_puid: "{{ media_puid | default(1000) }}"
 media_host_pgid: "{{ media_pgid | default(1000) }}"
 media_host_categories: "{{ media_categories | default(['movies', 'tv', 'anime', 'music']) }}"
+# Extra /data/media/<dir> folders that are not download categories (no /data/torrents twin):
+# aurral = Aurral's Library folder (LIBRARY_FOLDER in stack/aurral/compose.yaml).
+media_host_media_dirs: [aurral]
 
 # PVE scsi1 = the 3T data disk on media-ec. The by-id name is fixed by QEMU (drive-scsi1), so it
 # cannot be confused with the OS disk (drive-scsi0) the way /dev/sdX can.

@@ -1,7 +1,8 @@
 ---
 # TRaSH layout: one filesystem for torrents and media (hardlinks), one owner, setgid group-writable.
 # Only these directories are managed: never their contents, and (unlike the old script's
-# chown of /data/{torrents,media}/*) no extra subdirectories outside media_categories.
+# chown of /data/{torrents,media}/*) no extra subdirectories outside media_categories and
+# media_host_media_dirs.
 - name: Create the /opt/media-stack parent
   ansible.builtin.file:
     path: "{{ media_host_config_root | dirname }}"
@@ -23,4 +24,5 @@
         media_host_data_root ~ '/media']
        + (media_host_categories | map('regex_replace', '^', media_host_data_root ~ '/torrents/') | list)
        + (media_host_categories | map('regex_replace', '^', media_host_data_root ~ '/media/') | list)
+       + (media_host_media_dirs | map('regex_replace', '^', media_host_data_root ~ '/media/') | list)
        + [media_host_config_root, media_host_stack_root] }}

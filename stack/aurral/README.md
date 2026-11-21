@@ -26,7 +26,7 @@ rotate the key.
 
 | Folder | Path | Kind |
 |---|---|---|
-| Library folder | `/data/media/aurral` (`LIBRARY_FOLDER`; Aurral creates it) | Aurral's own downloads, flows, playlists |
+| Library folder | `/data/media/aurral` (`LIBRARY_FOLDER`; created by `playbooks/media-host.yml`) | Aurral's own downloads, flows, playlists |
 | Lidarr music | `/data/media/music` | Read-only folder: Aurral plays it and never changes it |
 
 In **Settings > Library**, add `/data/media/music` as a read-only folder. To play

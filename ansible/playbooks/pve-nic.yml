@@ -1,0 +1,14 @@
+---
+# Turn off TSO/GSO on the e1000e NICs listed per host in pve_nic_offload_off (inventory/hosts.yml).
+# Why: on 2026-11-21 intel-a163f8 logged 238 "e1000e eno1: Detected Hardware Unit Hang" messages
+# under torrent + Ceph load; the node dropped off the network, lost quorum and took VM 200 down.
+# The nodes on enp0s31f6 already run with TSO off and are not listed.
+# Applies at runtime with ethtool (no network restart) and persists a post-up line for the next boot.
+# usage (from ansible/), one node at a time:
+#   ansible-playbook playbooks/pve-nic.yml --check --diff
+#   ansible-playbook playbooks/pve-nic.yml --limit intel-91c45d
+- name: Turn off e1000e segmentation offload
+  hosts: pve_nodes
+  gather_facts: false
+  roles:
+    - pve_nic

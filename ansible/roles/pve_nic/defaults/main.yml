@@ -1,0 +1,9 @@
+---
+# NICs (per host, set in inventory/hosts.yml) whose TCP/generic segmentation offload is turned off.
+# Empty = nothing to do on that host.
+pve_nic_offload_off: []
+# Offload features turned off: ethtool -K name -> `ethtool -k` label (checked at runtime).
+pve_nic_features:
+  tso: tcp-segmentation-offload
+  gso: generic-segmentation-offload
+pve_nic_ethtool: /usr/sbin/ethtool

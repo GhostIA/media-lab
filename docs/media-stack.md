@@ -289,6 +289,7 @@ the kernel changed (containers come back by their restart policy).
 | *arr can't reach qBittorrent / Prowlarr sync fails | Rerun `ansible-playbook playbooks/qbt-prowlarr-config.yml`, then check the *arr's download client (Settings → Download Clients → Test) |
 | `/data` slow or I/O errors | Ceph health: `ansible-playbook playbooks/ceph.yml --tags status` (expect `HEALTH_OK`, 4 OSDs up/in) |
 | VM won't start | `ansible intel-a163f8 -a 'qm status 200'`, then `ansible intel-a163f8 -a 'qm start 200'`; Ceph must have quorum (3 MONs) |
+| Node drops off the network, loses quorum, everything on it goes down | Look for `e1000e ... Detected Hardware Unit Hang` in the previous boot: `ansible <node> -m shell -a 'journalctl -k -b -1 \| grep -c "Hardware Unit Hang"'` (intel-a163f8 logged 238 on 2026-11-21). Fix: TSO/GSO off, `ansible-playbook playbooks/pve-nic.yml` (add the NIC to `pve_nic_offload_off` in `inventory/hosts.yml`); check with `ethtool -k <nic> \| grep segmentation` |
 | Playbook run reports `changed` on a working host | Do not "fix" the host: run with `--check --diff`, read the diff, fix the role |
 
 **osd.1 pending sectors.** osd.1 (Seagate 4TB HDD on intel-177e78, serial `W8002A8K`) had 48 pending

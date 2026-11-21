@@ -1,0 +1,40 @@
+---
+# e1000e (Intel I219) hangs its transmit queue under heavy load while TSO/GSO is on
+# ("e1000e ... Detected Hardware Unit Hang"); the node then drops off the network and loses quorum.
+# Turns the offloads off now (ethtool, only where still on) and at every boot (post-up line in the
+# NIC's stanza of /etc/network/interfaces). Never runs ifreload or restarts networking.
+
+- name: Persist the offload setting in /etc/network/interfaces (post-up in the NIC's stanza)
+  ansible.builtin.lineinfile:
+    path: /etc/network/interfaces
+    regexp: '^\s*post-up\s+\S*ethtool\s+-K\s+{{ item }}\s'
+    line: "\tpost-up {{ pve_nic_ethtool }} -K {{ item }} {{ pve_nic_features.keys() | map('regex_replace', '$', ' off') | join(' ') }}"
+    insertafter: '^iface {{ item }} inet manual$'
+    firstmatch: true
+    backup: true
+  loop: "{{ pve_nic_offload_off }}"
+
+- name: Read the current offload state
+  ansible.builtin.command:
+    argv: ["{{ pve_nic_ethtool }}", -k, "{{ item }}"]
+  register: pve_nic_state
+  changed_when: false
+  check_mode: false
+  loop: "{{ pve_nic_offload_off }}"
+
+- name: Turn the offloads off now where they are still on
+  ansible.builtin.command:
+    argv: "{{ [pve_nic_ethtool, '-K', item.item] + pve_nic_args }}"
+  vars:
+    # labels of the managed features that ethtool reports as on (e.g. tcp-segmentation-offload)
+    pve_nic_on: >-
+      {{ item.stdout_lines | select('match', '^\S+: on') | map('regex_replace', ':.*$', '') | list }}
+    # ["tso", "off", "gso", "off"] for those features only
+    pve_nic_args: >-
+      {{ pve_nic_features | dict2items | selectattr('value', 'in', pve_nic_on) | map(attribute='key')
+         | map('regex_replace', '$', ' off') | join(' ') | split(' ') }}
+  loop: "{{ pve_nic_state.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: pve_nic_features.values() | select('in', pve_nic_on) | list | length > 0
+  changed_when: true

@@ -113,6 +113,8 @@ resource "proxmox_virtual_environment_vm" "media_stack" {
     prevent_destroy = true
     # import_from is a creation-time instruction (copy the cloud image into a new scsi0);
     # PVE does not keep it in the VM config, so it can never be read back.
-    ignore_changes = [disk[0].import_from]
+    # node_name: under HA (ha.tf) the VM can be running on another node after a failover; never
+    # let Terraform try to move (or re-create) it because of that. Move it with ha-manager.
+    ignore_changes = [disk[0].import_from, node_name]
   }
 }

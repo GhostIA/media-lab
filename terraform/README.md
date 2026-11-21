@@ -88,6 +88,7 @@ Check `qm config 200` on intel-a163f8 before and after (`diff` must be empty); i
 |---|---|---|
 | `proxmox_download_file.debian13` | `url` | PVE does not record where a file came from, so after an import `url` is null in state, and `url` is `RequiresReplace`: without the ignore, every plan would delete and re-download the image. It only matters when the file is created. |
 | `proxmox_virtual_environment_vm.media_stack` | `disk[0].import_from` | Creation-time instruction (copy the cloud image into a new scsi0). PVE does not keep it in the VM config, so it can never be read back. |
+| `proxmox_virtual_environment_vm.media_stack` | `node_name` | Under HA (`ha.tf`) the VM can run on another node after a failover. Terraform must never try to move or re-create it for that; move it with `ha-manager`. `node_name` stays the home node (and the node that holds the cloud image). |
 
 Also deliberate: the image has `overwrite = false`. The URL is Debian's `.../latest/`, which changes
 with every point release; with the default `true` the provider would replace the image on the
@@ -100,6 +101,42 @@ an in-place change of `initialization.user_account.keys`: do not apply that; set
 
 Everything else (CPU, memory, disks, cloud-init user/keys/IP/DNS, MAC, serial console, boot order)
 is read back from PVE and compared on every plan.
+
+## High availability (`ha.tf`)
+
+PVE 9 HA for VM 200: `proxmox_haresource` `vm:200` (state `started`, `max_restart` 1,
+`max_relocate` 2, `failback = false`, `auto_rebalance = false`) and a non-strict node-affinity
+`proxmox_harule` `media-stack` (`ha_node_priorities`: intel-a163f8 3, intel-d1babf 2,
+intel-1ecbc8 1, intel-177e78 1; intel-91c45d is left out because its `eno1` has TSO on, the e1000e
+hang trigger, but a non-strict rule still uses it as a last resort).
+
+What happens on a node failure: the node loses corosync quorum, its watchdog fences it (self-reboot
+after about 60 s), and the HA manager starts VM 200 on the highest-priority online node from the
+same Ceph disks. About 2-4 minutes of downtime and an unclean guest shutdown; no data is copied.
+With `failback = false` the VM stays on the new node when the old one returns.
+
+**Memory is the constraint.** VM 200 needs about 5.2 GiB on its host (5 GiB + QEMU overhead).
+Measured 2026-11-21 (`free -m`, available): intel-d1babf 5.3 GiB, intel-91c45d 5.0, intel-1ecbc8 4.5,
+intel-177e78 4.4 (each also runs a Ceph OSD of ~0.8-1.3 GiB). Only intel-d1babf barely fits; a
+failover onto the others can push the host into OOM (and kill its OSD). Before relying on HA, lower
+`memory_mb`, add ballooning (`floating`), or split services onto a second VM. HA's scheduler also
+counts services, not memory, until the datacenter option `crs: ha=static` is set (not managed here).
+
+Note: GPU passthrough (Jellyfin HW transcoding follow-up) pins a VM to one node and rules out HA
+for it.
+
+Apply, then check:
+
+```sh
+op run --env-file .env.op -- terraform plan     # expect: 2 to add, 0 to change, 0 to destroy
+op run --env-file .env.op -- terraform apply
+ansible intel-1ecbc8 -a 'ha-manager status'     # service vm:200 (intel-a163f8, started)
+```
+
+Test it safely later (a live migration, no fencing): pick a target with enough free memory, then
+`ansible intel-1ecbc8 -a 'ha-manager crm-command migrate vm:200 intel-d1babf'` and back again
+(`relocate` instead of `migrate` does a stop/start). A real failover test means cutting a node's
+network; plan downtime for it.
 
 ## 5. State
 

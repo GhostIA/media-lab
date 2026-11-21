@@ -105,3 +105,31 @@ variable "ssh_public_key_file" {
   type        = string
   default     = "~/.ssh/id_ed25519.pub"
 }
+
+variable "ha_max_restart" {
+  description = "HA: restart attempts on the same node before relocating (PVE default 1)."
+  type        = number
+  default     = 1
+}
+
+variable "ha_max_relocate" {
+  description = "HA: relocation attempts to another node after the restarts failed (PVE default 1)."
+  type        = number
+  default     = 2
+}
+
+variable "ha_node_priorities" {
+  description = <<-EOT
+    HA node affinity (higher = preferred). The home node (node_name) must stay highest, or HA
+    live-migrates the VM away as soon as the rule is applied. Failover targets: the nodes with the
+    most free RAM and TCP segmentation offload already off (no e1000e hang seen). intel-91c45d
+    (eno1, TSO on) is left out; the rule is not strict, so it is still a last resort.
+  EOT
+  type        = map(number)
+  default = {
+    "intel-a163f8" = 3
+    "intel-d1babf" = 2
+    "intel-1ecbc8" = 1
+    "intel-177e78" = 1
+  }
+}

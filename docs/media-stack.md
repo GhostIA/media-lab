@@ -52,7 +52,7 @@ Owner `1000:1000` (`media`), dirs `2775`, containers run with `PUID=1000 PGID=10
 | Item | Value |
 |---|---|
 | VMID / name | `200` / `media-stack` (defined in `terraform/`, `prevent_destroy`) |
-| Node | intel-a163f8 (`192.168.8.123`) |
+| Node | intel-a163f8 (`192.168.8.123`), home node. HA (`terraform/ha.tf`) restarts it on intel-d1babf, then intel-1ecbc8 / intel-177e78, after a node failure (~2-4 min; memory-limited, see [terraform/README.md](../terraform/README.md#high-availability-hatf)) |
 | OS | Debian 13 (trixie) cloud-init image, docker-ce + compose plugin |
 | IP | `192.168.8.200/24`, gateway `192.168.8.1` (static, via cloud-init) |
 | Sizing | 4 vCPU, 5 GiB RAM |
@@ -291,7 +291,8 @@ the kernel changed (containers come back by their restart policy).
 | Deploy fails at secrets | `op whoami`; check the field exists in item `media-stack`; rerun `ansible-playbook playbooks/secrets-init.yml` (only adds missing fields) |
 | *arr can't reach qBittorrent / Prowlarr sync fails | Rerun `ansible-playbook playbooks/qbt-prowlarr-config.yml`, then check the *arr's download client (Settings → Download Clients → Test) |
 | `/data` slow or I/O errors | Ceph health: `ansible-playbook playbooks/ceph.yml --tags status` (expect `HEALTH_OK`, 4 OSDs up/in) |
-| VM won't start | `ansible intel-a163f8 -a 'qm status 200'`, then `ansible intel-a163f8 -a 'qm start 200'`; Ceph must have quorum (3 MONs) |
+| VM won't start | Under HA, start/stop through HA, not `qm`: `ansible intel-1ecbc8 -a 'ha-manager status'`, then `ha-manager set vm:200 --state started`. The VM may run on another node after a failover (`qm status 200` on that node). Ceph must have quorum (3 MONs) |
+| All services down at once | Usually the node, not the stack: check `ha-manager status` (did vm:200 fail over?) and the old node's previous boot log (`journalctl -b -1`), e.g. `e1000e ... Detected Hardware Unit Hang` |
 | Playbook run reports `changed` on a working host | Do not "fix" the host: run with `--check --diff`, read the diff, fix the role |
 
 **osd.1 pending sectors.** osd.1 (Seagate 4TB HDD on intel-177e78, serial `W8002A8K`) had 48 pending

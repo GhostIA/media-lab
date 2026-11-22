@@ -64,4 +64,4 @@ Settings > Download Clients > + > qBittorrent:
 Both paths are under the same `/data` mount as the media folders, so completed downloads are
 hardlinked into `/data/media/{tv,anime}`, not copied. No remote path mappings are needed.
 
-Indexers come from Prowlarr (app sync from `prowlarr:9696` to `http://sonarr:8989`).
+Indexers come from Prowlarr (app sync from `http://192.168.8.201:9696` on VM 201 to `http://192.168.8.200:8989`).

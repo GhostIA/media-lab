@@ -49,7 +49,7 @@ variable "cpu_cores" {
 variable "memory_mb" {
   description = "Dedicated memory in MiB (no ballooning)."
   type        = number
-  default     = 5120
+  default     = 3584 # 5120 until the VM 201 split moved Jellyfin, Aurral, Seerr, Prowlarr, FlareSolverr off
 }
 
 variable "os_disk_gb" {

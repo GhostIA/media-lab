@@ -52,7 +52,7 @@ Settings → Media Management: enable *Use Hardlinks instead of Copy* (default o
 ## Indexers
 
 Added automatically by Prowlarr's app sync (Prowlarr → Settings → Apps → Radarr, server
-`http://radarr:7878`, API key from 1Password).
+`http://192.168.8.200:7878`, since Prowlarr runs on VM 201; API key from 1Password).
 
 ## Quality profiles
 

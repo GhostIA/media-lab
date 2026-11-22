@@ -18,6 +18,8 @@ media_host_data_source: disk
 # disk hosts: client IPs allowed to mount /data over NFS (empty = no NFS server installed)
 media_host_nfs_clients: []
 media_host_nfs_export_opts: rw,sync,no_subtree_check,root_squash
+# nfsd max payload in bytes, fixed so it no longer follows the VM's RAM (see nfs_server.yml)
+media_host_nfs_max_block_size: 1048576
 # nfs hosts: the VM that has the data disk, and the mount options
 media_host_nfs_server: "{{ media_vm.ip | default('') }}"
 media_host_nfs_mount_opts: nfsvers=4.2,hard,noatime,_netdev,nofail,x-systemd.mount-timeout=30s

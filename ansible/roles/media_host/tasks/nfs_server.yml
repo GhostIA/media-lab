@@ -30,6 +30,29 @@
     mode: "0644"
   notify: Reload NFS exports
 
+# nfsd sizes its maximum block from RAM at start (3.5 GiB VM -> 512 KiB). A client that mounted while
+# the limit was 1 MiB keeps rsize/wsize 1 MiB, and after a resize/reboot every request is rejected
+# ("nfsd RPC fragment too large") while the hard mount just hangs. Pin it; it can only be written
+# while nfsd is stopped, hence ExecStartPre.
+- name: Create the nfs-server.service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/nfs-server.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Pin the nfsd maximum block size
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nfs-server.service.d/max-block-size.conf
+    content: |
+      [Service]
+      ExecStartPre=/bin/sh -c 'echo {{ media_host_nfs_max_block_size }} > /proc/fs/nfsd/max_block_size'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart NFS server
+
 - name: Enable and start the NFS server
   ansible.builtin.systemd_service:
     name: nfs-server

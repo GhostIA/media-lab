@@ -38,8 +38,9 @@ a new one). Then under **Settings**:
      for a while, because it deletes data.
 4. Use **dry run** mode first if offered, check its logs/events, then switch it off.
 
-Use the container names (`qbittorrent`, `sonarr`, …), not `192.168.8.200`: all services share the
-compose network.
+Use the container names (`qbittorrent`, `sonarr`, …), not `192.168.8.200`: Cleanuparr and everything
+it talks to (both qBittorrent instances, Sonarr, Radarr, Lidarr) run on VM 200 and share its Docker
+network.
 
 ## Deploy / upgrade
 

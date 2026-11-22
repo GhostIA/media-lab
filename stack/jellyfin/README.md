@@ -1,12 +1,14 @@
 # Jellyfin
 
-Media server for the media-stack VM (VMID 200 `media-stack`, `192.168.8.200`, on node intel-a163f8).
+Media server on VM 201 (`media-apps`, `192.168.8.201`, node intel-d1babf). It reads `/data/media`
+over NFS from VM 200, at the same `/data` path as everywhere else; its config and transcode cache stay
+on VM 201's local disk.
 
 | Item | Value |
 |---|---|
 | Image | `lscr.io/linuxserver/jellyfin:12.4ubu2604-ls60` (upstream Jellyfin v12.4 on Ubuntu 26.04, LSIO build 60) |
-| Web UI | <http://192.168.8.200:8096> (own port; no proxy yet, ready for a later OIDC layer) |
-| Health | `curl -fsS http://192.168.8.200:8096/health` returns `Healthy` |
+| Web UI | <http://192.168.8.201:8096> (own port; no proxy yet, ready for a later OIDC layer) |
+| Health | `curl -fsS http://192.168.8.201:8096/health` returns `Healthy` |
 | Discovery | `7359/udp` (lets LAN clients find the server) |
 | Config | `${CONFIG_ROOT}/jellyfin` -> `/config` (cache in `/config/cache`, on the VM OS disk) |
 | Media | `${DATA_ROOT}` -> `/data` (libraries under `/data/media`) |
@@ -29,7 +31,7 @@ databases are in `/config/data`).
 
 ## First-run wizard
 
-Open <http://192.168.8.200:8096>; the wizard starts automatically.
+Open <http://192.168.8.201:8096>; the wizard starts automatically.
 
 1. **Language**: English (or your preference).
 2. **User**: create the admin account. Save the password in 1Password (`media-stack` item, vault

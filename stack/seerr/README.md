@@ -7,7 +7,7 @@ which find and download them. It's the merged successor of Jellyseerr and Overse
 
 | | |
 |---|---|
-| URL | <http://192.168.8.200:5055> |
+| URL | <http://192.168.8.201:5055> |
 | Image | `ghcr.io/seerr-team/seerr:v3.5.2` (official, pinned) |
 | Config | `/opt/media-stack/config/seerr` on the VM → `/app/config` (owned 1000:1000; the image runs as uid 1000) |
 | Data | none: Seerr only talks to the other apps' APIs |
@@ -22,14 +22,14 @@ ansible-playbook playbooks/media-stack.yml -e '{"media_stack_services": ["seerr"
 ```
 
 Upgrade: bump the tag in `compose.yaml` (see the [releases](https://github.com/seerr-team/seerr/releases)),
-PR, deploy as above, check `curl -fsS http://192.168.8.200:5055/api/v1/status`. Roll back by
+PR, deploy as above, check `curl -fsS http://192.168.8.201:5055/api/v1/status`. Roll back by
 reverting the tag (back up `config/` first: Seerr migrates its database on upgrade).
 
 ## First-run setup (in the browser, once)
 
 Do the Jellyfin setup wizard first (Seerr signs in with a Jellyfin admin account).
 
-1. Open <http://192.168.8.200:5055> and choose **Jellyfin**.
+1. Open <http://192.168.8.201:5055> and choose **Jellyfin**.
 2. Jellyfin URL: `http://jellyfin:8096` (container name on the stack network), then sign in with the
    Jellyfin admin account. Sync libraries: Movies, Shows, Anime (and skip Music: Seerr doesn't
    request music).
@@ -42,8 +42,9 @@ Do the Jellyfin setup wizard first (Seerr signs in with a Jellyfin admin account
    profile if you created one), mark it default.
 5. Finish. Users can now sign in with their Jellyfin accounts.
 
-Use the container names (`radarr`, `sonarr`, `jellyfin`), not `192.168.8.200`: all services share
-the compose network.
+Seerr runs on VM 201 with Jellyfin, so Jellyfin is `jellyfin` (port 8096, container name). Radarr and
+Sonarr are on VM 200, where container names do not resolve from VM 201: use host `192.168.8.200`
+(ports 7878 / 8989).
 
 ## Auth
 

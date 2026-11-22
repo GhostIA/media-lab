@@ -1,4 +1,4 @@
-# Terraform: VM 200 `media-stack`
+# Terraform: VM 200 `media-stack` and VM 201 `media-apps`
 
 Defines the media stack VM (VMID 200 on `intel-a163f8`, disks on Ceph `media-ec`) and the Debian 13
 cloud image it was created from, with the [`bpg/proxmox`](https://registry.terraform.io/providers/bpg/proxmox/0.123.1)
@@ -10,6 +10,8 @@ phases of the old `pve-tools/vm-media-stack.sh`; the guest setup (docker, `/data
 |---|---|
 | `versions.tf` | Terraform and provider version pins |
 | `main.tf` | `proxmox_download_file.debian13`, `proxmox_virtual_environment_vm.media_stack` |
+| `vm201.tf` | VM 201 `media-apps` on intel-d1babf (`proxmox_virtual_environment_vm.media_apps`, 4 vCPU / 3 GiB, OS disk only) and its own copy of the cloud image (`proxmox_download_file.debian13_apps`: `local:import` is per node) |
+| `ha.tf` | HA resource and rule for VM 200 (**not applied yet**, see below) |
 | `variables.tf` | every value of the live VM (defaults = current config) |
 | `outputs.tf` | VMID, node, IP, MAC, image volume ID |
 | `import.tf` | `import {}` blocks that adopt the existing image and VM |
@@ -104,6 +106,18 @@ is read back from PVE and compared on every plan.
 
 ## High availability (`ha.tf`)
 
+**Not applied yet.** Until it is, a plain `terraform plan` shows the two HA objects as to-add, so every
+apply so far has been targeted at the VM resources only, e.g.
+
+```sh
+op run --env-file .env.op -- terraform plan -target=proxmox_virtual_environment_vm.media_apps \
+  -target=proxmox_download_file.debian13_apps -out=vm201.tfplan
+op run --env-file .env.op -- terraform plan -target=proxmox_virtual_environment_vm.media_stack -out=vm200.tfplan
+```
+
+Read the plan before applying it: it must never list `proxmox_haresource` / `proxmox_harule` until HA
+is meant to go live.
+
 PVE 9 HA for VM 200: `proxmox_haresource` `vm:200` (state `started`, `max_restart` 1,
 `max_relocate` 2, `failback = false`, `auto_rebalance = false`) and a non-strict node-affinity
 `proxmox_harule` `media-stack` (`ha_node_priorities`: intel-a163f8 3, intel-d1babf 2,
@@ -115,7 +129,8 @@ after about 60 s), and the HA manager starts VM 200 on the highest-priority onli
 same Ceph disks. About 2-4 minutes of downtime and an unclean guest shutdown; no data is copied.
 With `failback = false` the VM stays on the new node when the old one returns.
 
-**Memory is the constraint.** VM 200 needs about 5.2 GiB on its host (5 GiB + QEMU overhead).
+**Memory is the constraint.** Since the VM 201 split VM 200 is 3.5 GiB (was 5 GiB; about 5.2 GiB
+on its host with QEMU overhead, the numbers below are from before the split).
 Measured 2026-11-21 (`free -m`, available): intel-d1babf 5.3 GiB, intel-91c45d 5.0, intel-1ecbc8 4.5,
 intel-177e78 4.4 (each also runs a Ceph OSD of ~0.8-1.3 GiB). Only intel-d1babf barely fits; a
 failover onto the others can push the host into OOM (and kill its OSD). Before relying on HA, lower

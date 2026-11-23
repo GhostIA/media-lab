@@ -1,0 +1,23 @@
+---
+# Tailscale on the 5 PVE nodes (tag:pve) and the media VMs 200/201 (tag:media).
+# Joins each host once with a pre-authorized, tagged auth key from terraform/tailnet
+# (`terraform output -raw pve_auth_key` / `media_auth_key`, read on the control machine from the
+# local state: run terraform/tailnet's apply first, or restore its state from 1Password).
+# Flags: --accept-dns=false, --accept-routes=false, no exit node, no Tailscale SSH (OpenSSH stays).
+# A host that is already logged in with the right tags is left alone (changed=0).
+#
+# usage (from ansible/):
+#   ansible-playbook playbooks/tailscale.yml --check --diff
+#   ansible-playbook playbooks/tailscale.yml --limit intel-1ecbc8     # one node first
+#   ansible-playbook playbooks/tailscale.yml
+#   ansible-playbook playbooks/tailscale.yml -e tailscale_auth_key=tskey-auth-...   # key by hand
+- name: Tailscale on the Proxmox nodes (one at a time)
+  hosts: pve_nodes
+  serial: 1
+  roles:
+    - tailscale
+
+- name: Tailscale on the media VMs
+  hosts: media_vms
+  roles:
+    - tailscale

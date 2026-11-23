@@ -1,0 +1,129 @@
+---
+# Tailscale on a lab host: official apt repo (deb822, like docker in media_host), tailscaled
+# enabled, and `tailscale up` ONLY when the host is not yet logged in with exactly
+# tailscale_tags. On a joined host it only re-asserts --accept-dns=false/--accept-routes=false and
+# checks the exit-node opt-in, so a rerun is changed=0. Never sets an exit node.
+
+- name: Check the tag settings
+  ansible.builtin.assert:
+    that:
+      - tailscale_tags | length > 0
+      - tailscale_auth_key != '' or tailscale_auth_key_output != ''
+    fail_msg: Set tailscale_tags and tailscale_auth_key_output for this host's group (inventory/hosts.yml).
+    quiet: true
+
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Download the Tailscale apt key
+  ansible.builtin.get_url:
+    url: "{{ tailscale_repo_url }}/{{ ansible_facts.distribution_release }}.noarmor.gpg"
+    dest: "{{ tailscale_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: tailscale_key
+
+- name: Add the Tailscale apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.sources
+    content: |
+      Types: deb
+      URIs: {{ tailscale_repo_url }}
+      Suites: {{ ansible_facts.distribution_release }}
+      Components: main
+      Signed-By: {{ tailscale_keyring }}
+    owner: root
+    group: root
+    mode: "0644"
+  register: tailscale_repo
+
+- name: Install tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: "{{ tailscale_key is changed or tailscale_repo is changed or 'tailscale' not in ansible_facts.packages }}"
+
+- name: Enable and start tailscaled
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    enabled: true
+    state: started
+  # only matters in check mode on a host where nothing was really installed
+  when: not ansible_check_mode or 'tailscale' in ansible_facts.packages
+
+- name: Read the Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status_raw
+  changed_when: false
+  check_mode: false
+  # rc != 0 = tailscaled not running/installed yet (check mode on a fresh host)
+  failed_when: false
+
+- name: Work out whether this host must log in
+  ansible.builtin.set_fact:
+    tailscale_backend: "{{ tailscale_status.BackendState | default('NoState') }}"
+    tailscale_tags_have: "{{ (tailscale_status.Self | default({})).Tags | default([], true) | sort }}"
+    tailscale_need_up: >-
+      {{ (tailscale_status.BackendState | default('')) != 'Running'
+         or ((tailscale_status.Self | default({})).Tags | default([], true) | sort) != (tailscale_tags | sort) }}
+  vars:
+    tailscale_status: "{{ tailscale_status_raw.stdout | from_json if tailscale_status_raw.rc == 0 else {} }}"
+
+- name: Read the auth key from terraform output {{ tailscale_auth_key_output }}
+  ansible.builtin.command:
+    argv: [terraform, "-chdir={{ tailscale_terraform_dir }}", output, -raw, "{{ tailscale_auth_key_output }}"]
+  delegate_to: localhost
+  become: false
+  register: tailscale_key_output
+  changed_when: false
+  no_log: true
+  when: tailscale_need_up and tailscale_auth_key == '' and not ansible_check_mode
+
+- name: Join the tailnet as {{ tailscale_tags | join(',') }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['tailscale', 'up', '--reset',
+          '--auth-key=' ~ (tailscale_auth_key if tailscale_auth_key != '' else tailscale_key_output.stdout | default('')),
+          '--advertise-tags=' ~ (tailscale_tags | join(',')),
+          '--hostname=' ~ tailscale_hostname]
+         + tailscale_up_flags
+         + (['--force-reauth'] if tailscale_backend == 'Running' else []) }}
+  changed_when: true
+  # the auth key is in argv
+  no_log: true
+  when: tailscale_need_up
+
+- name: Read the Tailscale preferences
+  ansible.builtin.command: tailscale debug prefs
+  register: tailscale_prefs_raw
+  changed_when: false
+  check_mode: false
+  when: not tailscale_need_up
+
+- name: Keep DNS and routes off
+  ansible.builtin.command:
+    argv: "{{ ['tailscale', 'set'] + tailscale_up_flags }}"
+  changed_when: true
+  when:
+    - not tailscale_need_up
+    - (tailscale_prefs_raw.stdout | from_json).CorpDNS | default(false)
+      or (tailscale_prefs_raw.stdout | from_json).RouteAll | default(false)
+
+- name: Refuse an exit node this host has not opted into
+  ansible.builtin.assert:
+    that:
+      - tailscale_exit_node == '' or tailscale_allow_exit_node | bool
+      - tailscale_exit_node == '' or tailscale_prefs.ExitNodeAllowLANAccess | default(false)
+    fail_msg: >-
+      {{ inventory_hostname }} uses exit node {{ tailscale_exit_node }}.
+      {{ 'Set tailscale_allow_exit_node: true for it in inventory/hosts.yml if that is intended, '
+         ~ 'or turn it off with: tailscale set --exit-node=' if not tailscale_allow_exit_node | bool
+         else 'It must keep the LAN direct: tailscale set --exit-node-allow-lan-access=true' }}
+      (PVE nodes: corosync, Ceph and NFS must stay on the LAN.)
+    quiet: true
+  vars:
+    tailscale_prefs: "{{ tailscale_prefs_raw.stdout | from_json }}"
+    tailscale_exit_node: "{{ tailscale_prefs.ExitNodeID | default('', true) ~ tailscale_prefs.ExitNodeIP | default('', true) }}"
+  when: not tailscale_need_up

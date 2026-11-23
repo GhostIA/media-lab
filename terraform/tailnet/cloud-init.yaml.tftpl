@@ -1,0 +1,56 @@
+#cloud-config
+# Vultr exit node, rendered by exit_node.tf. Contains a SINGLE-USE, short-lived Tailscale auth
+# key (it is also in Vultr's instance metadata and in terraform.tfstate): once the node has
+# joined, the key is spent and the copy on disk is shredded.
+hostname: ${hostname}
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - unattended-upgrades
+
+write_files:
+  - path: /etc/sysctl.d/99-tailscale-exit-node.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # an exit node forwards traffic for the tailnet
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+  - path: /root/tailscale-authkey
+    owner: root:root
+    permissions: "0600"
+    content: ${authkey}
+  - path: /root/tailscale-bootstrap.sh
+    owner: root:root
+    permissions: "0700"
+    content: |
+      #!/bin/sh
+      # Install Tailscale from its official apt repo and join as an exit node.
+      set -eu
+      sysctl --system >/dev/null
+      curl -fsSL -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+        https://pkgs.tailscale.com/stable/debian/${suite}.noarmor.gpg
+      printf '%s\n' 'Types: deb' 'URIs: https://pkgs.tailscale.com/stable/debian' \
+        'Suites: ${suite}' 'Components: main' \
+        'Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg' \
+        > /etc/apt/sources.list.d/tailscale.sources
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y tailscale
+      systemctl enable --now tailscaled
+      # if the image ships ufw, let WireGuard in and forwarded tailnet traffic through
+      if command -v ufw >/dev/null 2>&1; then
+        ufw allow 41641/udp
+        ufw allow in on tailscale0
+        ufw route allow in on tailscale0
+      fi
+      tailscale up --auth-key=file:/root/tailscale-authkey --advertise-exit-node \
+        --advertise-tags=${tag} --ssh --hostname=${hostname}
+      shred -u /root/tailscale-authkey
+      tailscale set --auto-update=true
+      # no public SSH: Tailscale SSH replaces it (Vultr's web console is the break-glass path)
+      systemctl disable --now ssh.service ssh.socket 2>/dev/null || systemctl disable --now ssh.service
+
+runcmd:
+  - [/root/tailscale-bootstrap.sh]

@@ -97,6 +97,17 @@ setup a healthy run reports `changed=0`.
 | Change the VM (CPU, RAM, disks) | Edit `terraform/variables.tf`, then `cd terraform && op run --env-file .env.op -- terraform plan`. Read the plan before `apply` |
 | Get a secret | `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/<field>` (fields: `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`, `qbittorrent_lidarr_password`) |
 
+## Remote access (Tailscale)
+
+The five nodes, both VMs and the GL.iNet router are on a Tailscale tailnet
+([`terraform/tailnet/`](terraform/tailnet/README.md) + `ansible/playbooks/tailscale.yml`). From
+anywhere you reach the LAN through the router (`192.168.8.0/24`) and the lab hosts by name.
+There is an exit node in Amsterdam on a USD 5/month Vultr VM (`vultr-exit-ams`), and Mullvad exit
+nodes if the add-on is bought. **Nothing uses an exit node unless you switch it on for that
+device**, and never on the Proxmox nodes. **No torrents through Vultr** (DMCA → account ban).
+The first-time setup has manual steps (OAuth client, 1Password item, router UI), listed in order
+in the tailnet README.
+
 ## Where the files are
 
 Downloads land in `/data/torrents/<type>` and the apps move them to `/data/media/<type>`
@@ -121,5 +132,6 @@ instant hardlink, not a copy. App settings are in `/opt/media-stack/config/<app>
 | [`docs/media-stack.md`](docs/media-stack.md) | Operator runbook: architecture, backup/restore, upgrades, troubleshooting, follow-ups |
 | [`ansible/README.md`](ansible/README.md) | Every playbook, tags, rebuild-from-scratch order, safety rules, secrets |
 | [`terraform/README.md`](terraform/README.md) | VM 200 as code: API token, import, plan/apply |
+| [`terraform/tailnet/README.md`](terraform/tailnet/README.md) | Tailscale: policy, auth keys, Vultr exit node, router, Mullvad; bootstrap order |
 | `stack/<app>/README.md` | Per-app notes (e.g. Sonarr's anime setup, Jellyfin hardware transcoding) |
 | [`CLAUDE.md`](CLAUDE.md) | Rules for AI-assisted changes (attribution, secrets) |

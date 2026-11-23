@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: GhostIA
+  description: Tailscale from the official apt repo; join the tailnet once with a tagged key (no DNS, no routes, no exit node)
+  license: MIT
+  min_ansible_version: "2.18"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

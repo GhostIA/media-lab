@@ -1,0 +1,12 @@
+# Local state (backed up to the 1Password document media-lab-tailnet-tfstate), plans, provider cache.
+# .terraform.lock.hcl IS committed.
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+crash.log
+# Values that would identify people (logins/emails) or hold secrets: never in this public repo
+*.auto.tfvars
+terraform.tfvars
+# Raw policy exports from the admin console (they name people)
+policy.current.*

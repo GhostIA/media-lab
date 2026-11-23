@@ -31,6 +31,16 @@ qbt_prowlarr_config_qbt_prefs:
   max_active_downloads: 10
   max_active_uploads: 10
   max_active_torrents: 15
+  # Stalled torrents and magnets still fetching metadata stop occupying a queue slot once they stay
+  # below the thresholds (KiB/s) for slow_torrent_inactive_timer seconds (qBittorrent's defaults).
+  dont_count_slow_torrents: true
+  slow_torrent_dl_rate_threshold: 2
+  slow_torrent_ul_rate_threshold: 2
+  slow_torrent_inactive_timer: 60
+  # Global download limit per instance, bytes/s (8 MiB/s). Unlimited downloads on the media VM
+  # saturated the Ceph EC pool (HDD OSDs: BLUESTORE_SLOW_OP_ALERT, 98% I/O pressure on VM 200).
+  # Both instances together can still reach 16 MiB/s; lower this if Ceph warns again.
+  dl_limit: 8388608
 # container whose `docker logs` carry the temporary password on a fresh install
 qbt_prowlarr_config_qbt_container: qbittorrent
 

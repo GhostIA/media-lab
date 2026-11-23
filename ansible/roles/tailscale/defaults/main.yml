@@ -1,0 +1,25 @@
+---
+# Tags this host joins with. Set per group in inventory/hosts.yml (pve_nodes: tag:pve,
+# media_vms: tag:media); must match the tags of the auth key below.
+tailscale_tags: []
+# Name of the terraform/tailnet output that holds the matching auth key (pve_auth_key, media_auth_key).
+tailscale_auth_key_output: ""
+# terraform/tailnet/ on the control machine. `terraform output` only reads its local state: no
+# credentials, no op run, no API call.
+tailscale_terraform_dir: "{{ playbook_dir }}/../../terraform/tailnet"
+# Pass a key directly instead (-e tailscale_auth_key=...); empty = read it from terraform output.
+tailscale_auth_key: ""
+tailscale_hostname: "{{ inventory_hostname }}"
+# Lab hosts never let Tailscale touch DNS (/etc/resolv.conf on PVE/Ceph) or install the routes
+# other devices advertise: the router advertises this very LAN, and accepting it would send
+# corosync/Ceph/NFS traffic through the tunnel.
+tailscale_up_flags:
+  - --accept-dns=false
+  - --accept-routes=false
+# Opt-in to an exit node per host (host var). While false, the play FAILS on a host that uses an
+# exit node, so a forgotten `tailscale set --exit-node` on a PVE node is caught. Even when true,
+# the exit node must be used with --exit-node-allow-lan-access=true.
+tailscale_allow_exit_node: false
+
+tailscale_repo_url: https://pkgs.tailscale.com/stable/debian
+tailscale_keyring: /usr/share/keyrings/tailscale-archive-keyring.gpg

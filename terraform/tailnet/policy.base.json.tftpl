@@ -1,0 +1,13 @@
+// The tailnet's OWN policy rules, kept as they are; policy.tf merges the lab additions into them
+// (tags, grants, autoApprovers, ssh, nodeAttrs, tests). See README.md, "Base policy".
+//
+// Format: JSON plus full-line // comments (stripped before parsing). No trailing commas, no
+// comments at the end of a line. Logins/emails are NOT written here (public repo): use
+// $${id.<name>} and put the value in var.policy_identities (1Password field policy_identities).
+//
+// PLACEHOLDER: replace this whole object with the tailnet's current policy before the first
+// apply. The __replace_with_current_policy key makes the plan fail until then, so the
+// tailnet's existing rules can never be overwritten by this stub.
+{
+  "__replace_with_current_policy": true
+}

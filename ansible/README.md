@@ -20,7 +20,7 @@ Operator runbook: [docs/media-stack.md](../docs/media-stack.md). Design and cont
 | 1Password CLI with desktop integration | `op whoami` (lookups and `op run` resolve secrets at runtime) |
 | SSH key `~/.ssh/id_ed25519` | Its `.pub` must be in root's `authorized_keys` on the nodes: run `playbooks/ssh-keys.yml` once (below). The VM's `media` user gets the same key from cloud-init |
 
-Smoke test: `ansible all -m ansible.builtin.ping` (6 hosts: 5 nodes + `media-stack`).
+Smoke test: `ansible all -m ansible.builtin.ping` (7 hosts: 5 nodes + `media-stack` + `media-apps`).
 
 ## 2. Inventory and shared vars
 
@@ -53,6 +53,7 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 | `playbooks/ssh-keys.yml` | `pve_nodes` (run_once) | | Adds `~/.ssh/id_ed25519.pub` to root's `/etc/pve/priv/authorized_keys` (cluster-wide file); password login stays as fallback | `pvessh.sh` / `askpass.sh` password login |
 | `playbooks/pve-repos.yml` | `pve_nodes` | | No-subscription deb822 repos (PVE + Ceph tentacle), enterprise repos disabled, apt cache | `fix-repos.sh` |
 | `playbooks/pve-nic.yml` | `pve_nodes` (hosts with `pve_nic_offload_off`) | | TSO/GSO off on the listed e1000e NICs (intel-a163f8, intel-91c45d: `eno1`): `ethtool -K` now, `post-up` line in `/etc/network/interfaces` for boot. No network restart. Workaround for "e1000e Detected Hardware Unit Hang" (2026-11-21: 238 hangs on intel-a163f8, node lost quorum) | (new) |
+| `playbooks/tailscale.yml` | `pve_nodes` (serial 1), `media_vms` | | Tailscale from the official apt repo (deb822 `tailscale.sources`), `tailscaled` enabled, and `tailscale up` once with the group's tagged, pre-authorized key (`tag:pve` / `tag:media`, read with `terraform -chdir=../terraform/tailnet output -raw pve_auth_key` / `media_auth_key` on the Mac, no_log). Flags `--accept-dns=false --accept-routes=false`, hostname = inventory name, no exit node, no Tailscale SSH. Skips `up` when already logged in with the same tags; re-asserts the DNS/routes flags; **fails** on a host that uses an exit node without `tailscale_allow_exit_node: true` and LAN access. See [terraform/tailnet/README.md](../terraform/tailnet/README.md) | (new) |
 | `playbooks/inventory-report.yml` | `pve_nodes` | | Nothing (read-only readiness report) | `inventory.sh` |
 | `playbooks/pve-cluster.yml` | `pve_nodes` | | Joins a node to cluster `media` via the PVE API; skipped when the node is already clustered | `join.sh` |
 | `playbooks/ceph.yml` | `pve_nodes` / `ceph_mons` / `ceph_osds` | `install`, `init`, `mons`, `pool`, `status` (all run by default); `osds` (tagged `never`) | Ceph packages, `ceph.conf`, MON/MGR, EC 2+1 pool + PVE storage `media-ec`; `status` is read-only. `osds` zaps and creates OSDs: **destructive**, needs `--tags osds -e confirm_destroy=<serial>` | `ceph-setup.sh` |
@@ -106,6 +107,7 @@ op run --env-file .env.op -- terraform apply
 | 11 | Deploy the stack | `ansible-playbook playbooks/media-stack.yml` |
 | 12 | qBittorrent + Prowlarr app sync | `ansible-playbook playbooks/qbt-prowlarr-config.yml` |
 | 13 | *arr root folders + qBittorrent download client (needs the qBittorrent password from step 12) | `ansible-playbook playbooks/arr-config.yml` |
+| 14 | Tailscale (optional; after the bootstrap and apply in [terraform/tailnet/README.md](../terraform/tailnet/README.md)) | `ansible-playbook playbooks/tailscale.yml` |
 
 Then the manual steps in [docs/media-stack.md](../docs/media-stack.md) section 4 (Jellyfin wizard,
 indexers). On the existing cluster steps 1-13 are converge runs: each must report `changed=0`,
@@ -130,6 +132,10 @@ and `terraform plan` must show no changes.
 - Nothing here touches node boot disks or corosync config; `pve-cluster.yml` skips nodes that are
   already clustered.
 - Terraform: never apply a plan that replaces or destroys VM 200.
+- Tailscale: never set an exit node on a PVE node. Corosync, Ceph and NFS must stay on the LAN.
+  A lab host opts in by setting the host var `tailscale_allow_exit_node: true` and running
+  `tailscale set --exit-node=<name> --exit-node-allow-lan-access=true` (VMs only). Without the
+  host var, `tailscale.yml` fails on that host.
 
 ## 6. Secrets
 
@@ -141,4 +147,6 @@ resolved values only land on the target (mode 0600). Nothing secret is committed
 |---|---|---|
 | `media-stack` | `sonarr_api_key`, `radarr_api_key`, `lidarr_api_key`, `prowlarr_api_key`, `aurral_api_key`, `qbittorrent_password`, `qbittorrent_lidarr_password` | `secrets-init.yml` (creates), `media-stack.yml`, `arr-config.yml`, `qbt-prowlarr-config.yml` |
 | `pve-terraform` | token secret of `terraform@pve!media` | `pve-terraform-token.yml` (creates), `terraform/.env.op` |
+| `tailscale-terraform` | Tailscale OAuth client (`client_id`, `client_secret`) and `policy_identities` (logins the policy names) | `terraform/tailnet/.env.op`. The lab auth keys are not in 1Password: `tailscale.yml` reads them from `terraform/tailnet`'s state (backup: document `media-lab-tailnet-tfstate`) |
+| `Vultr` (vault `y2gzkuozzzojcdddk25gspbe3m`) | Vultr API key | `terraform/tailnet/.env.op` |
 | one item per node (IDs were in `pve-tools/nodes.txt`) | root password | password fallback only (e.g. before `ssh-keys.yml` has run) |

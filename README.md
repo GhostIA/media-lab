@@ -6,13 +6,13 @@ losing data), and one VM on top runs the media apps in Docker:
 
 | App | What it's for | URL |
 |---|---|---|
-| **Jellyfin** | Watch and listen: movies, TV, anime, music | <http://192.168.8.200:8096> |
+| **Jellyfin** | Watch and listen: movies, TV, anime, music | <http://192.168.8.201:8096> |
 | **Sonarr** | Finds and organises TV shows and anime | <http://192.168.8.200:8989> |
 | **Radarr** | Same for movies | <http://192.168.8.200:7878> |
 | **Lidarr** | Same for music | <http://192.168.8.200:8686> |
-| **Aurral** | Discover, request and play music; hands album requests to Lidarr | <http://192.168.8.200:3001> |
-| **Prowlarr** | Manages indexers for all three of the above | <http://192.168.8.200:9696> |
-| **Seerr** | Request page: users sign in with Jellyfin and ask for movies/shows; Radarr/Sonarr fetch them | <http://192.168.8.200:5055> |
+| **Aurral** | Discover, request and play music; hands album requests to Lidarr | <http://192.168.8.201:3001> |
+| **Prowlarr** | Manages indexers for all three of the above | <http://192.168.8.201:9696> |
+| **Seerr** | Request page: users sign in with Jellyfin and ask for movies/shows; Radarr/Sonarr fetch them | <http://192.168.8.201:5055> |
 | **Cleanuparr** | Cleans the download queue: stalled, failed-import, malware and finished/orphaned downloads | <http://192.168.8.200:11011> |
 | **qBittorrent** | Download client for Radarr and Sonarr | <http://192.168.8.200:8080> |
 | **qBittorrent (Lidarr)** | Download client for Lidarr only | <http://192.168.8.200:8081> |
@@ -53,8 +53,9 @@ ansible-playbook playbooks/ceph.yml --tags status         # Ceph should say HEAL
 And the apps, from anywhere on the LAN:
 
 ```sh
-for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status 11011/health; do
-  printf '%-12s ' $p; curl -fsS -m 5 http://192.168.8.200:$p; echo; done
+for u in 200:8989/ping 200:7878/ping 200:8686/ping 200:11011/health \
+         201:8096/health 201:9696/ping 201:5055/api/v1/status 201:3001/api/health/live; do
+  printf '%-22s ' $u; curl -fsS -m 5 http://192.168.8.${u%%:*}:${u#*:}; echo; done
 curl -s -o /dev/null -w 'qbittorrent  %{http_code}\n' http://192.168.8.200:8080/   # 200
 curl -s -o /dev/null -w 'qbt-lidarr   %{http_code}\n' http://192.168.8.200:8081/   # 200
 ```

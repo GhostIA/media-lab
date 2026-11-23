@@ -71,7 +71,7 @@
     qbt_prowlarr_config_secret_field: apiKey
     qbt_prowlarr_config_want_fields:
       prowlarrUrl: "{{ qbt_prowlarr_config_prowlarr_internal_url }}"
-      baseUrl: "http://{{ qbt_prowlarr_config_app.svc }}:{{ qbt_prowlarr_config_app.port }}"
+      baseUrl: "http://{{ qbt_prowlarr_config_apps_host }}:{{ qbt_prowlarr_config_app.port }}"
       apiKey: "{{ qbt_prowlarr_config_secrets[qbt_prowlarr_config_app.svc ~ '_api_key'] }}"
 
 - name: Sync the qBittorrent download client

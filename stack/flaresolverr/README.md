@@ -15,8 +15,9 @@ headless Chromium; **Prowlarr** sends requests for tagged indexers through it.
 
 1. Prowlarr → **Settings → Indexers** → **+** → **FlareSolverr**.
 2. Name `FlareSolverr`, Tags: type **`flaresolverr`** (creates the tag), Host
-   **`http://flaresolverr:8191/`** (container name on the stack network, not `192.168.8.200`: no host
-   port is published), Request Timeout `60`.
+   **`http://flaresolverr:8191/`** (container name: FlareSolverr and Prowlarr both run on VM 201 and
+   share its Docker network; no host port is published), Request Timeout `60`. Keep the two on the
+   same VM, or this name stops resolving.
 3. **Test**, then **Save**.
 
 ## Using it

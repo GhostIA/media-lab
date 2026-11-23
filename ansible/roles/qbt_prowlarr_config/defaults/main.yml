@@ -34,15 +34,19 @@ qbt_prowlarr_config_qbt_prefs:
 # container whose `docker logs` carry the temporary password on a fresh install
 qbt_prowlarr_config_qbt_container: qbittorrent
 
-# Prowlarr (API v1)
-qbt_prowlarr_config_prowlarr_url: "http://{{ media_vm.ip }}:9696"
-qbt_prowlarr_config_prowlarr_internal_url: http://prowlarr:9696
+# Prowlarr (API v1). Prowlarr runs on VM 201 (media_apps_vm), the *arrs and qBittorrent on VM 200
+# (media_vm): container names do not resolve across the two VMs, so every cross-VM URL is IP:port.
+qbt_prowlarr_config_prowlarr_url: "http://{{ media_apps_vm.ip }}:9696"
+# how the *arrs (VM 200) reach Prowlarr; Prowlarr sends this to them as prowlarrUrl
+qbt_prowlarr_config_prowlarr_internal_url: "http://{{ media_apps_vm.ip }}:9696"
+# where Prowlarr reaches the *arrs (baseUrl of each application)
+qbt_prowlarr_config_apps_host: "{{ media_vm.ip }}"
 # applications synced by Prowlarr; svc = compose service name (also the 1Password field prefix)
 qbt_prowlarr_config_apps:
   - {name: Sonarr, svc: sonarr, port: 8989}
   - {name: Radarr, svc: radarr, port: 7878}
   - {name: Lidarr, svc: lidarr, port: 8686}
-# qBittorrent download client as seen from inside the compose network
+# qBittorrent download client as Prowlarr (VM 201) reaches it on VM 200
 qbt_prowlarr_config_dc_name: qBittorrent
-qbt_prowlarr_config_dc_host: qbittorrent
+qbt_prowlarr_config_dc_host: "{{ media_vm.ip }}"
 qbt_prowlarr_config_dc_port: 8080

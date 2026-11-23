@@ -5,7 +5,8 @@ Image `lscr.io/linuxserver/prowlarr` (pinned tag in `compose.yaml`).
 
 | | |
 |---|---|
-| UI | `http://192.168.8.200:9696` |
+| UI | `http://192.168.8.201:9696` (VM 201; the *arrs and qBittorrent it syncs to are on VM 200) |
+| Cross-VM URLs | app sync `baseUrl` `http://192.168.8.200:<port>`, `prowlarrUrl` `http://192.168.8.201:9696`, download client `192.168.8.200:8080`, all set by `playbooks/qbt-prowlarr-config.yml` |
 | Config | `${CONFIG_ROOT}/prowlarr` → `/config` |
 | Auth | `Forms`, not required for local (LAN) addresses (`PROWLARR__AUTH__*`), ready for a later OIDC proxy |
 | API key | `PROWLARR__AUTH__APIKEY` from `secrets.env` (`op inject` of `secrets.env.tpl`, 1Password `media-stack/prowlarr_api_key`) |
@@ -26,9 +27,10 @@ op signin                    # optional: lets the script read keys from 1Passwor
 stack/prowlarr/configure.sh  # all | apps | downloadclient
 ```
 
-- Applications **Sonarr**, **Radarr**, **Lidarr**: Full Sync, Prowlarr server `http://prowlarr:9696`,
-  app server `http://sonarr:8989`, `http://radarr:7878`, `http://lidarr:8686` (compose network names).
-- Download client **qBittorrent**: host `qbittorrent`, port `8080`, user `admin` (for manual grabs in Prowlarr).
+- Applications **Sonarr**, **Radarr**, **Lidarr**: Full Sync, Prowlarr server `http://192.168.8.201:9696`,
+  app server `http://192.168.8.200:8989`, `:7878`, `:8686` (IPs: Prowlarr is on VM 201, the *arrs on VM 200).
+  `playbooks/qbt-prowlarr-config.yml` sets these; the older `configure.sh` still writes compose names.
+- Download client **qBittorrent**: host `192.168.8.200`, port `8080`, user `admin` (for manual grabs in Prowlarr).
   Its category is Prowlarr's default `prowlarr`, which Prowlarr creates in qBittorrent when the client is
   saved; with no save path of its own it follows qBittorrent's default save path (`/data/torrents`, so
   `/data/torrents/prowlarr` once `qbittorrent/configure.sh` has run; run that one first).

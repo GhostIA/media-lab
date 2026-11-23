@@ -3,7 +3,12 @@
 media_stack_src: "{{ playbook_dir }}/../../stack"
 # Parent of each service's config dir (<config_root>/<svc>, created owned by PUID:PGID).
 media_stack_config_root: "{{ media_config_root | default('/opt/media-stack/config') }}"
-# Services passed to `docker compose up` (empty = all services in the merged Compose files).
+# Services this VM runs (per host in the inventory). Only these get a config dir, a secrets.env
+# and `docker compose up`; the Compose files of the others are shipped too (one project definition
+# everywhere) but never started here. Empty = every service (single-VM layout).
+media_stack_host_services: []
+# Narrow one run to some services (-e '{"media_stack_services": ["sonarr"]}'); empty = all of this
+# host's services. A host that runs none of the listed services is left alone.
 media_stack_services: []
 # Separator between templates in the single `op inject` call: a comment line with real newlines
 # (YAML double quotes) around it; it must not occur in a template.

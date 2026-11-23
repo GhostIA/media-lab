@@ -1,7 +1,8 @@
 # Runbook: *arr media stack
 
 Operator guide for the media stack on the `media` Proxmox cluster: Jellyfin, Sonarr (TV + anime),
-Radarr, Lidarr, Aurral, Prowlarr and qBittorrent in one Docker Compose project on VM 200.
+Radarr, Lidarr, Aurral, Prowlarr and qBittorrent in one Docker Compose project, split over two VMs:
+VM 200 (data disk, downloaders, *arrs) and VM 201 (the apps that only read or request media).
 How it was built: [arr-batch-kickstart.md](arr-batch-kickstart.md), then moved to Ansible + Terraform
 ([iac-batch-kickstart.md](iac-batch-kickstart.md)). Repo rules: [CLAUDE.md](../CLAUDE.md).
 Playbook reference (prerequisites, inventory, every playbook and tag): [ansible/README.md](../ansible/README.md).
@@ -13,27 +14,32 @@ else from anywhere on the Mac.
 
 ```
 Mac (repo checkout, op CLI, gh)
- │  ssh media@192.168.8.200            ansible <node> -a '<cmd>'  (PVE nodes, from ansible/)
- │  ansible-playbook (ansible/)        terraform (terraform/, VM 200 definition)
+ │  ssh media@192.168.8.200 / .201     ansible <node> -a '<cmd>'  (PVE nodes, from ansible/)
+ │  ansible-playbook (ansible/)        terraform (terraform/, VM 200 + VM 201 definitions)
  ▼
-VM 200 "media-stack"  (Debian 13, 192.168.8.200, runs on intel-a163f8 / 192.168.8.123)
- └─ docker compose project "media-stack"   (/opt/media-stack/stack, one -f per stack/<svc>/compose.yaml)
-     ├─ jellyfin     :8096   media server            reads  /data/media
+VM 200 "media-stack"  (Debian 13, 192.168.8.200, home node intel-a163f8 / 192.168.8.123)
+ ├─ data disk 3T (ext4 /data), NFS-exported to VM 201 only
+ └─ compose project "media-stack", services of this VM only (media_stack_host_services)
+     ├─ qbittorrent  :8080   radarr + sonarr downloads /data/torrents/{movies,tv,anime}
+     ├─ qbittorrent-lidarr :8081  lidarr downloads    /data/torrents/music
      ├─ sonarr       :8989   TV + anime               /data  (torrents -> media, hardlinks)
      ├─ radarr       :7878   movies                   /data
      ├─ lidarr       :8686   music                    /data
-     ├─ aurral       :3001   music discovery/requests  /data  (Lidarr plugin, library /data/media/aurral)
-     ├─ prowlarr     :9696   indexers -> app sync to sonarr/radarr/lidarr
-     ├─ cleanuparr   :11011  queue cleanup: stalled/failed/malware/orphaned downloads (qbittorrent + *arrs)
+     └─ cleanuparr   :11011  queue cleanup: stalled/failed/malware/orphaned downloads (qbittorrent + *arrs)
+
+VM 201 "media-apps"   (Debian 13, 192.168.8.201, node intel-d1babf / 192.168.8.194)
+ ├─ /data = NFSv4.2 mount of 192.168.8.200:/data (same path everywhere; configs stay local, never NFS)
+ └─ compose project "media-stack", services of this VM only
+     ├─ jellyfin     :8096   media server            reads  /data/media
+     ├─ aurral       :3001   music discovery/requests  /data  (library /data/media/aurral; Lidarr plugin -> 192.168.8.200:8686)
+     ├─ prowlarr     :9696   indexers -> app sync to sonarr/radarr/lidarr at 192.168.8.200
      ├─ flaresolverr (8191, internal only)  Cloudflare solver, Prowlarr indexer proxy (tag flaresolverr)
-     ├─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr
-     ├─ qbittorrent  :8080   radarr + sonarr downloads /data/torrents/{movies,tv,anime}
-     └─ qbittorrent-lidarr :8081  lidarr downloads    /data/torrents/music
- │
- ├─ OS disk   32G  (ext4 /)                ─┐
- └─ data disk 3T   (ext4 /data)            ─┴─ PVE storage "media-ec" (RBD)
-                                                └─ Ceph EC 2+1 pool media-ec-data (host failure domain)
-                                                   4 OSDs on 1ecbc8, 177e78, 91c45d, d1babf
+     └─ seerr        :5055   requests (Jellyfin login) -> radarr / sonarr at 192.168.8.200
+
+Container names resolve only inside one VM (one Docker network per VM): across VMs use IP:port.
+
+Both VMs: OS disk 32G (ext4 /); VM 200's data disk too. All on PVE storage "media-ec" (RBD)
+  └─ Ceph EC 2+1 pool media-ec-data (host failure domain), 4 OSDs on 1ecbc8, 177e78, 91c45d, d1babf
 ```
 
 `/data` layout (TRaSH Guides). One filesystem, mounted at the same path `/data` in every container,
@@ -49,14 +55,18 @@ Owner `1000:1000` (`media`), dirs `2775`, containers run with `PUID=1000 PGID=10
 
 ## 2. VM facts
 
+VM 201 `media-apps` (`terraform/vm201.tf`): node intel-d1babf, `192.168.8.201/24`, 4 vCPU / 3 GiB,
+OS disk 32G only (no data disk), `/data` over NFS from VM 200, login `ssh media@192.168.8.201`; same
+`/opt/media-stack/{stack,config}` layout. Runs Jellyfin, Aurral, Prowlarr, FlareSolverr, Seerr. VM 200:
+
 | Item | Value |
 |---|---|
 | VMID / name | `200` / `media-stack` (defined in `terraform/`, `prevent_destroy`) |
 | Node | intel-a163f8 (`192.168.8.123`), home node. HA (`terraform/ha.tf`) restarts it on intel-d1babf, then intel-1ecbc8 / intel-177e78, after a node failure (~2-4 min; memory-limited, see [terraform/README.md](../terraform/README.md#high-availability-hatf)) |
 | OS | Debian 13 (trixie) cloud-init image, docker-ce + compose plugin |
 | IP | `192.168.8.200/24`, gateway `192.168.8.1` (static, via cloud-init) |
-| Sizing | 4 vCPU, 5 GiB RAM |
-| Disks | OS 32G + data 3T (thin), both on `media-ec`; data disk is ext4 mounted at `/data` |
+| Sizing | 4 vCPU, 3.5 GiB RAM (5 GiB until the Jellyfin/Aurral/Seerr/Prowlarr/FlareSolverr move to VM 201) |
+| Disks | OS 32G + data 3T (thin), both on `media-ec`; data disk is ext4 mounted at `/data`, NFS-exported to `192.168.8.201` |
 | Login | `ssh media@192.168.8.200` (key `~/.ssh/id_ed25519.pub`; `media` is uid/gid 1000, in `docker` group) |
 | Stack checkout | `/opt/media-stack/stack` (synced from `stack/` by `playbooks/media-stack.yml`, not a git clone) |
 | App configs | `/opt/media-stack/config/<service>` |
@@ -70,13 +80,13 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 
 | Service | URL | Health check (from the Mac) | Expect |
 |---|---|---|---|
-| Jellyfin | http://192.168.8.200:8096 | `curl -fsS http://192.168.8.200:8096/health` | `Healthy` |
+| Jellyfin | http://192.168.8.201:8096 | `curl -fsS http://192.168.8.201:8096/health` | `Healthy` |
 | Sonarr | http://192.168.8.200:8989 | `curl -fsS http://192.168.8.200:8989/ping` | `{"status":"OK"}` |
 | Radarr | http://192.168.8.200:7878 | `curl -fsS http://192.168.8.200:7878/ping` | `{"status":"OK"}` |
 | Lidarr | http://192.168.8.200:8686 | `curl -fsS http://192.168.8.200:8686/ping` | `{"status":"OK"}` |
-| Aurral | http://192.168.8.200:3001 | `curl -fsS http://192.168.8.200:3001/api/health/live` | `{"status":"ok"}` |
-| Prowlarr | http://192.168.8.200:9696 | `curl -fsS http://192.168.8.200:9696/ping` | `{"status":"OK"}` |
-| Seerr | http://192.168.8.200:5055 | `curl -fsS http://192.168.8.200:5055/api/v1/status` | JSON with `"version"` |
+| Aurral | http://192.168.8.201:3001 | `curl -fsS http://192.168.8.201:3001/api/health/live` | `{"status":"ok"}` |
+| Prowlarr | http://192.168.8.201:9696 | `curl -fsS http://192.168.8.201:9696/ping` | `{"status":"OK"}` |
+| Seerr | http://192.168.8.201:5055 | `curl -fsS http://192.168.8.201:5055/api/v1/status` | JSON with `"version"` |
 | Cleanuparr | http://192.168.8.200:11011 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:11011/health` | `200` |
 | qBittorrent | http://192.168.8.200:8080 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8080/` | `200` |
 | qBittorrent (Lidarr) | http://192.168.8.200:8081 | `curl -fsS -o /dev/null -w '%{http_code}\n' http://192.168.8.200:8081/` | `200` |
@@ -84,15 +94,17 @@ LAN only, plain HTTP, one port per app (so an auth proxy can be put in front lat
 All at once:
 
 ```sh
-for p in 8096/health 8989/ping 7878/ping 8686/ping 9696/ping 5055/api/v1/status 11011/health 8080/; do
-  printf '%-12s ' "$p"; curl -fsS -m 5 -o /dev/null -w '%{http_code}\n' "http://192.168.8.200:$p" || echo FAIL
+for u in 200:8989/ping 200:7878/ping 200:8686/ping 200:11011/health 200:8080/ 200:8081/ \
+         201:8096/health 201:9696/ping 201:5055/api/v1/status 201:3001/api/health/live 201:8191/; do
+  printf '%-26s ' "$u"; curl -fsS -m 5 -o /dev/null -w '%{http_code}\n' "http://192.168.8.${u%%:*}:${u#*:}" || echo FAIL
 done
 ```
 
-Container state on the VM:
+Container state on each VM (each runs only its own services of the one `media-stack` project):
 
 ```sh
-ssh media@192.168.8.200 'docker compose -p media-stack ps'
+ssh media@192.168.8.200 'docker ps --format "{{.Names}} {{.Status}}"'
+ssh media@192.168.8.201 'docker ps --format "{{.Names}} {{.Status}}"'
 ```
 
 ## 4. Bring-up from scratch
@@ -121,7 +133,7 @@ never runs `docker compose down` (a removed service must be taken down by hand).
 Order matters for 5-7: the stack must be up before the API playbooks run, and the *arrs must be up
 before Prowlarr syncs to them.
 
-**Jellyfin first-run wizard** (http://192.168.8.200:8096):
+**Jellyfin first-run wizard** (http://192.168.8.201:8096):
 
 1. Language, then create the admin user. Store it in 1Password yourself (it is not generated by
    `playbooks/secrets-init.yml`).
@@ -287,7 +299,9 @@ the kernel changed (containers come back by their restart policy).
 |---|---|
 | Imports copy instead of hardlink (slow, double space) | Source and target must be on the same filesystem under the single `/data` mount, with the same path in qBittorrent and the *arrs. No per-folder mounts like `/downloads` or `/tv`. Test: `ssh media@192.168.8.200 'touch /data/torrents/tv/t && ln /data/torrents/tv/t /data/media/tv/t && stat -c %i /data/torrents/tv/t /data/media/tv/t; rm -f /data/torrents/tv/t /data/media/tv/t'` (same inode twice) |
 | *arr "Access denied" / "folder not writable" | Everything is owned by `1000:1000`, dirs `2775`, `PUID=1000 PGID=1000 UMASK=002`. Fix: `ssh media@192.168.8.200 'sudo chown -R 1000:1000 /data /opt/media-stack/config && sudo find /data -type d -exec chmod 2775 {} +'` |
-| Container restarting | `ssh media@192.168.8.200 'docker compose -p media-stack logs --tail 100 <svc>'` |
+| Container restarting | `ssh media@192.168.8.<200|201> 'docker logs --tail 100 <svc>'` (on the VM that runs it) |
+| Jellyfin/Aurral hang on media, `/data` on VM 201 blocks | NFS from VM 200. `ssh media@192.168.8.200 'sudo dmesg | grep nfsd; cat /proc/fs/nfsd/max_block_size'`: `RPC fragment too large` means nfsd's max block shrank below the client's mount (happens when VM 200's RAM changes); the `media_host` role pins it to 1 MiB (`media_host_nfs_max_block_size`), rerun `playbooks/media-host.yml --limit media-stack`. Right after nfsd starts, writes wait out a 90 s NFSv4 grace period |
+| A service on VM 201 can't reach one on VM 200 (or back) | Container names resolve only within one VM. Use `192.168.8.200:<port>` / `192.168.8.201:<port>` for anything that crosses VMs |
 | Deploy fails at secrets | `op whoami`; check the field exists in item `media-stack`; rerun `ansible-playbook playbooks/secrets-init.yml` (only adds missing fields) |
 | *arr can't reach qBittorrent / Prowlarr sync fails | Rerun `ansible-playbook playbooks/qbt-prowlarr-config.yml`, then check the *arr's download client (Settings → Download Clients → Test) |
 | `/data` slow or I/O errors | Ceph health: `ansible-playbook playbooks/ceph.yml --tags status` (expect `HEALTH_OK`, 4 OSDs up/in) |

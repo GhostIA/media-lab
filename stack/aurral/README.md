@@ -3,8 +3,10 @@
 - Image: `ghcr.io/lklynet/aurral:3.0.1` (same digest as `latest` on 2026-11-21). Upgrade by bumping
   the pinned tag and redeploying. Read the release notes first: plugins are beta and can break
   between releases.
-- UI/API: `http://192.168.8.200:3001`, health: `curl -fsS http://192.168.8.200:3001/api/health/live`
-  (`{"status":"ok"}`).
+- Runs on VM 201 (media-apps). UI/API: `http://192.168.8.201:3001`, health:
+  `curl -fsS http://192.168.8.201:3001/api/health/live` (`{"status":"ok"}`).
+- Same VM as Prowlarr and Jellyfin, so Aurral reaches them by compose name (`http://prowlarr:9696`,
+  `http://jellyfin:8096`). Lidarr and qBittorrent are on VM 200: use `192.168.8.200:<port>`.
 - Config/database: `${CONFIG_ROOT}/aurral` (`/opt/media-stack/config/aurral`), mounted as `/config`.
   Data: `${DATA_ROOT}` mounted as `/data` (same path as every other service).
 - Runs as `PUID:PGID` (1000:1000). Aurral ignores `UMASK`, so its files are 644/755, which Jellyfin
@@ -26,7 +28,7 @@ rotate the key.
 
 | Folder | Path | Kind |
 |---|---|---|
-| Library folder | `/data/media/aurral` (`LIBRARY_FOLDER`; Aurral creates it) | Aurral's own downloads, flows, playlists |
+| Library folder | `/data/media/aurral` (`LIBRARY_FOLDER`; created by `playbooks/media-host.yml` on VM 200, reached over NFS) | Aurral's own downloads, flows, playlists |
 | Lidarr music | `/data/media/music` | Read-only folder: Aurral plays it and never changes it |
 
 In **Settings > Library**, add `/data/media/music` as a read-only folder. To play
@@ -42,7 +44,7 @@ source:
 2. **Aurral > Settings > Plugins > Install from a link > use the official plugins > Lidarr**
    (version 0.3.0 or later).
 3. Open the plugin and fill in:
-   - URL: `http://lidarr:8686` (compose service name)
+   - URL: `http://192.168.8.200:8686` (Lidarr is on VM 200; the name `lidarr` does not resolve on VM 201)
    - API key: `op read op://xmjfgnsondcvlqa6bovelwdztm/media-stack/lidarr_api_key`
    - Root folder for new artists: `/data/media/music`
 4. Select **Test**, then turn the plugin on. To have Lidarr handle album requests first, drag Lidarr

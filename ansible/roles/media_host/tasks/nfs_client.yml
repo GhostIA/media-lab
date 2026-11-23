@@ -1,0 +1,34 @@
+---
+# /data over NFS from the VM that has the data disk (media_host_data_source: nfs, e.g. VM 201).
+# Same mount path as on the server, so every container sees the same /data/... paths everywhere.
+# hard: a server outage blocks I/O instead of corrupting writes; nofail + _netdev keep the boot
+# going without it, and docker.service requires the mount (docker_requires_data.yml).
+# App configs (SQLite) stay on the local disk under /opt/media-stack/config, never on NFS.
+- name: Check the NFS server is set
+  ansible.builtin.assert:
+    that: media_host_nfs_server | length > 0
+    fail_msg: media_host_data_source is nfs but media_host_nfs_server is empty
+    quiet: true
+
+- name: Install the NFS client
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the /data mountpoint
+  ansible.builtin.file:
+    path: "{{ media_host_data_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mount /data from the NFS server (and add it to /etc/fstab)
+  ansible.posix.mount:
+    path: "{{ media_host_data_root }}"
+    src: "{{ media_host_nfs_server }}:{{ media_host_data_root }}"
+    fstype: nfs4
+    opts: "{{ media_host_nfs_mount_opts }}"
+    state: mounted

@@ -31,7 +31,7 @@ Smoke test: `ansible all -m ansible.builtin.ping` (6 hosts: 5 nodes + `media-sta
 | `pve_nodes` | intel-1ecbc8 `192.168.8.234`, intel-a163f8 `.123`, intel-177e78 `.162`, intel-91c45d `.196`, intel-d1babf `.194` | `root`, key auth |
 | `ceph_mons` | intel-1ecbc8, intel-a163f8, intel-177e78 (MON + MGR) | as `pve_nodes` |
 | `ceph_osds` | OSD nodes, each with host var `ceph_osd_serials` (disk serials) | as `pve_nodes` |
-| `media_vms` | `media-stack` `192.168.8.200` (VM 200) | user `media`, `become: true` |
+| `media_vms` | `media-stack` `192.168.8.200` (VM 200: data disk, NFS server, downloaders and *arrs), `media-apps` `192.168.8.201` (VM 201: `/data` over NFS, Jellyfin/Aurral/Prowlarr/FlareSolverr/Seerr) | user `media`, `become: true`; per-host `media_stack_host_services`, `media_host_data_source`, `media_host_nfs_clients` |
 
 Shared vars live in `inventory/group_vars/all.yml` (next to the inventory, so every playbook
 loads them): `op_vault` (1Password vault Lab), LAN `192.168.8.0/24`
@@ -56,11 +56,11 @@ ansible intel-a163f8 -m ansible.builtin.shell -a 'qm config 200 | grep ^scsi'   
 | `playbooks/inventory-report.yml` | `pve_nodes` | | Nothing (read-only readiness report) | `inventory.sh` |
 | `playbooks/pve-cluster.yml` | `pve_nodes` | | Joins a node to cluster `media` via the PVE API; skipped when the node is already clustered | `join.sh` |
 | `playbooks/ceph.yml` | `pve_nodes` / `ceph_mons` / `ceph_osds` | `install`, `init`, `mons`, `pool`, `status` (all run by default); `osds` (tagged `never`) | Ceph packages, `ceph.conf`, MON/MGR, EC 2+1 pool + PVE storage `media-ec`; `status` is read-only. `osds` zaps and creates OSDs: **destructive**, needs `--tags osds -e confirm_destroy=<serial>` | `ceph-setup.sh` |
-| `playbooks/pve-terraform-token.yml` | `pve_api_node` (192.168.8.234) | | API user/token `terraform@pve!media` with a scoped role; token secret stored in 1Password item `pve-terraform` | (new) |
+| `playbooks/pve-terraform-token.yml` | `pve_api_node` (192.168.8.234) | | API user/token `terraform@pve!media` with a scoped role (VMs 200 and 201, their nodes, the storages); token secret stored in 1Password item `pve-terraform` | (new) |
 | `terraform/` (not a playbook) | PVE API | | Debian 13 cloud image + VM 200 (`bpg/proxmox` 0.123.1), `prevent_destroy` | `vm-media-stack.sh image` / `create` / `start` |
-| `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, data disk (formatted **only if blank and confirmed** with `-e confirm_format=<disk>`), `/data` fstab mount, `/data` tree, `/opt/media-stack` | `vm-media-stack.sh bootstrap` |
+| `playbooks/media-host.yml` | `media_vms` | | docker-ce + compose plugin, rsync, qemu-guest-agent, `/opt/media-stack`, docker requires `/data`. `media_host_data_source: disk` (VM 200): data disk (formatted **only if blank and confirmed** with `-e confirm_format=<disk>`), fstab mount, `/data` tree, NFS export to `media_host_nfs_clients`. `nfs` (VM 201): NFSv4.2 mount of VM 200's `/data` at the same path | `vm-media-stack.sh bootstrap` |
 | `playbooks/secrets-init.yml` | `localhost` | | Creates 1Password item `media-stack` / adds missing fields only; never overwrites | `stack/secrets-init.sh` |
-| `playbooks/media-stack.yml` | `media_vms` | | Syncs `stack/` to `/opt/media-stack/stack`, renders `<svc>/secrets.env` (0600) from 1Password, `docker compose up` (never `down`) | `stack/deploy.sh` |
+| `playbooks/media-stack.yml` | `media_vms` | | Syncs `stack/` to `/opt/media-stack/stack` on each VM, renders `<svc>/secrets.env` (0600) from 1Password for that VM's services, `docker compose up` of exactly that VM's `media_stack_host_services` (never `down`, never another VM's services) | `stack/deploy.sh` |
 | `playbooks/arr-config.yml` | `localhost` → app APIs | | Root folders: Sonarr `/data/media/tv` + `/data/media/anime`, Radarr `/data/media/movies`, Lidarr `/data/media/music` (only adds missing); download client qBittorrent (`qbittorrent:8080`, user `admin`) with category Sonarr `tv`, Radarr `movies`; Lidarr gets its own `qBittorrent (Lidarr)` (`qbittorrent-lidarr:8081`, `music`) (adds, or fixes it when settings differ or its test fails) | `stack/{sonarr,radarr,lidarr}/configure.sh`, manual download-client setup |
 | `playbooks/qbt-prowlarr-config.yml` | `localhost` → app APIs | | For each qBittorrent instance (`qbittorrent`, `qbittorrent-lidarr`): password, prefs/save path, queue limits, categories (`movies tv anime music` / `music`); Prowlarr apps (Sonarr, Radarr, Lidarr) + qBittorrent download client | `stack/{qbittorrent,prowlarr}/configure.sh` |
 
@@ -122,6 +122,11 @@ and `terraform plan` must show no changes.
   `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1` or the `/dev/sdX` it resolves to). A blank
   disk without it stops the play before anything is written. It never reformats `/data`.
 - `media-stack.yml` never runs `docker compose down`; a removed service must be taken down by hand.
+- Moving a service between VMs: change `media_stack_host_services` in the inventory, `docker stop
+  <svc>` on the old VM, copy `/opt/media-stack/config/<svc>` with ownership kept (`tar --numeric-owner
+  -p` over ssh), deploy with `--limit <new vm> -e '{"media_stack_services": ["<svc>"]}'`, then rename
+  the old config dir to `<svc>.moved-YYYYMMDD`. Fix any URL that used the container name of a service
+  on the other VM (container names resolve only inside one VM).
 - Nothing here touches node boot disks or corosync config; `pve-cluster.yml` skips nodes that are
   already clustered.
 - Terraform: never apply a plan that replaces or destroys VM 200.

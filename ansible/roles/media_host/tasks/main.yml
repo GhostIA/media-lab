@@ -1,7 +1,9 @@
 ---
 # media_host: replaces the `bootstrap` phase of pve-tools/vm-media-stack.sh.
-# Order: data disk and the docker -> /data dependency first, so on a fresh VM docker never starts
+# Order: /data and the docker -> /data dependency first, so on a fresh VM docker never starts
 # against an empty /data on the OS disk; then packages and services; then the directory tree.
+# media_host_data_source picks where /data comes from: `disk` (VM 200: its own data disk, and the
+# NFS export to media_host_nfs_clients) or `nfs` (VM 201: mounted from media_host_nfs_server).
 - name: Wait for cloud-init to finish first-boot setup
   ansible.builtin.command: cloud-init status --wait
   args:
@@ -11,11 +13,29 @@
   failed_when: false
   check_mode: false
 
+- name: Check the /data source
+  ansible.builtin.assert:
+    that: media_host_data_source in ['disk', 'nfs']
+    fail_msg: "media_host_data_source must be disk or nfs, not {{ media_host_data_source }}"
+    quiet: true
+
 - name: Data disk
   ansible.builtin.import_tasks: data_disk.yml
+  when: media_host_data_source == 'disk'
+
+- name: Data over NFS
+  ansible.builtin.import_tasks: nfs_client.yml
+  when: media_host_data_source == 'nfs'
+
+- name: Docker requires the /data mount
+  ansible.builtin.import_tasks: docker_requires_data.yml
 
 - name: Packages and services
   ansible.builtin.import_tasks: packages.yml
+
+- name: NFS export of /data
+  ansible.builtin.import_tasks: nfs_server.yml
+  when: media_host_data_source == 'disk' and media_host_nfs_clients | length > 0
 
 - name: Directory tree
   ansible.builtin.import_tasks: dirs.yml
